@@ -620,6 +620,8 @@ async function claudeAction(action) {
       body.cwd = document.getElementById("cwd").value.trim();
       body.args = sessionArgs();
     }
+    // 新会话 / 重启前清空终端，避免上一段会话的残留画面与新会话内容叠在一起
+    if (action !== "stop" && term) term.reset();
     const r = await api(`/api/claude/${action}`, { method: "POST", body: JSON.stringify(body) });
     if (action !== "stop" && term) { term.focus(); fitTerm(); }
     toast(r.message || "ok", "ok");

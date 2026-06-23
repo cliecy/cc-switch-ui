@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cc-switch-ui"
-version = "0.1.0"
+version = "0.1.1"
 description = "CC Switch Web UI —— Claude Code 多供应商 / 多账号管理面板"
 readme = "README.md"
 license = {text = "MIT"}

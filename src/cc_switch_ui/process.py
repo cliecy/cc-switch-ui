@@ -3,6 +3,7 @@ claude 进程管理（pty + SSE）。
 通过伪终端运行 claude，提供实时输出广播、看门狗、窗口大小调整。
 """
 
+import codecs
 import fcntl
 import os
 import pty
@@ -14,7 +15,6 @@ import subprocess
 import termios
 import threading
 import time
-from collections import deque
 
 
 class ClaudeProcess:
@@ -23,7 +23,6 @@ class ClaudeProcess:
         self.master_fd = None
         self.started_at = None
         self.reader_thread = None
-        self.buffer = deque(maxlen=4000)  # 输出环形缓冲（按行）
         self.subscribers = set()  # SSE 队列集合
         self.lock = threading.Lock()
         self.provider_label = None
@@ -60,12 +59,9 @@ class ClaudeProcess:
 
         q = queue.Queue(maxsize=1000)
         with self.lock:
-            # 先补发历史缓冲，便于刚连上的客户端看到上下文
-            for line in list(self.buffer):
-                try:
-                    q.put_nowait(line)
-                except Exception:
-                    break
+            # 不重放历史缓冲：TUI 输出依赖光标定位 / 备用屏，旧字节无法离线重放，
+            # 重放只会让(重)连接的客户端画面错乱、前后会话叠在一起。新订阅者只接实时流
+            # （EventSource 网络抖动会自动重连，每次重连都会重新走到这里）。
             self.subscribers.add(q)
         return q
 
@@ -75,7 +71,6 @@ class ClaudeProcess:
 
     def _broadcast(self, text):
         with self.lock:
-            self.buffer.append(text)
             dead = []
             for q in self.subscribers:
                 try:
@@ -87,6 +82,10 @@ class ClaudeProcess:
 
     # ---- 读取线程 ----
     def _reader(self, fd):
+        # 增量解码：UTF-8 多字节字符（TUI 框线 ─│└、中文、emoji）可能被 4096
+        # 字节的读取边界切断，逐块独立 decode 会把切断处变成乱码。增量解码器
+        # 会把读到一半的尾字节留到下一块拼回来。
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         while True:
             try:
                 r, _, _ = select.select([fd], [], [], 0.5)
@@ -94,9 +93,14 @@ class ClaudeProcess:
                     data = os.read(fd, 4096)
                     if not data:
                         break
-                    self._broadcast(data.decode("utf-8", errors="replace"))
+                    text = decoder.decode(data)
+                    if text:
+                        self._broadcast(text)
             except (OSError, ValueError):
                 break
+        tail = decoder.decode(b"", final=True)
+        if tail:
+            self._broadcast(tail)
         self.last_exit_code = self.proc.poll() if self.proc else None
         self._broadcast(f"\n[进程已退出 · code={self.last_exit_code}]\n")
         self._on_exit()
@@ -182,7 +186,6 @@ class ClaudeProcess:
         self._last_env = env_extra
         self._last_label = provider_label
         self._stopping = False
-        self.buffer.clear()
         self._broadcast(f"[启动 claude · 供应商: {provider_label}]\n")
 
         self.reader_thread = threading.Thread(target=self._reader, args=(master,), daemon=True)
