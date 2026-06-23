@@ -24,34 +24,60 @@
 - 已安装 `claude`（Claude Code CLI）
 - `ccm` 命令为可选：存在时切换会额外调用 `ccm use <provider>`，不存在则直接写配置 + 注入环境变量
 
-## 启动
+## 安装 & 启动
+
+已发布到 [PyPI](https://pypi.org/project/cc-switch-ui/)，安装后会得到一个 `cc-switch-ui` 命令。
+
+### 方式一：装成 CLI（推荐）
+
+```bash
+# 用 uv（推荐）或 pipx / pip 安装为全局命令
+uv tool install cc-switch-ui
+# 或： pipx install cc-switch-ui
+# 或： pip install cc-switch-ui
+
+# 启动（默认 127.0.0.1:8765）
+cc-switch-ui
+
+# 指定地址端口
+cc-switch-ui --host 127.0.0.1 --port 8765
+```
+
+免安装、一次性试跑：
+
+```bash
+uvx cc-switch-ui
+```
+
+### 方式二：从源码运行（开发）
 
 依赖已写进 `pyproject.toml` / `uv.lock`，`uv run` 会自动创建虚拟环境并装好依赖，无需手动 install：
 
 ```bash
-cd ~/cc-switch-ui
+git clone https://github.com/cliecy/cc-switch-ui
+cd cc-switch-ui
 
-# 直接启动（首次会自动同步依赖，默认 127.0.0.1:8765）
-uv run app.py
-
-# 或指定地址端口：
-uv run app.py --host 127.0.0.1 --port 8765
+# 首次会自动同步依赖
+uv run cc-switch-ui --host 127.0.0.1 --port 8765
+# 兼容入口： uv run app.py
 ```
 
-然后浏览器打开 **http://127.0.0.1:8765** 即可（`index.html` 由后端同源托管，无需单独打开文件，避免跨域问题）。
+启动后浏览器打开 **http://127.0.0.1:8765** 即可（`index.html` 由后端同源托管，无需单独打开文件，避免跨域问题）。
 
-> 想显式同步环境：`uv sync`。也可以用 venv 解释器直接跑：`.venv/bin/python app.py`
+> CLI 参数只有两个：`--host`（默认 `127.0.0.1`）和 `--port`（默认 `8765`）。
 
-### 项目文件
+### 项目结构
 
-| 文件 | 作用 |
+| 路径 | 作用 |
 |------|------|
-| `app.py` | Flask 后端 |
-| `index.html` | 单文件前端 |
-| `pyproject.toml` | 项目元数据 + 依赖声明（flask） |
+| `src/cc_switch_ui/app.py` | CLI 入口（`cc-switch-ui` 命令 → `main()`） |
+| `src/cc_switch_ui/server.py` | Flask 后端：REST API + SSE |
+| `src/cc_switch_ui/process.py` | `claude` 进程管理（pty / 保活看门狗） |
+| `src/cc_switch_ui/config.py` | 配置读写（`~/.ccm_config`） |
+| `src/cc_switch_ui/index.html` | 单文件前端（内嵌 CSS/JS） |
+| `app.py` | 兼容入口，指向包内 `main()` |
+| `pyproject.toml` | 项目元数据 + 依赖 + `[project.scripts]` 入口 |
 | `uv.lock` | 锁定的依赖版本，保证可复现 |
-| `.python-version` | 指定 Python 3.12 |
-| `.gitignore` | 忽略 `.venv/` 等 |
 | `run.sh` | 守护脚本（常驻 / 崩溃自愈，无需 root） |
 
 ## 长期挂着 / 常驻部署
@@ -96,8 +122,7 @@ Description=CC Switch Web UI
 After=network.target
 
 [Service]
-WorkingDirectory=%h/cc-switch-ui
-ExecStart=%h/.local/bin/uv run app.py --host 127.0.0.1 --port 8765
+ExecStart=%h/.local/bin/cc-switch-ui --host 127.0.0.1 --port 8765
 Restart=always
 RestartSec=3
 
