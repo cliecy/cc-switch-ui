@@ -2,6 +2,7 @@
 Flask 应用工厂 + 全部路由。
 """
 
+import ipaddress
 import json
 import os
 import shutil
@@ -12,15 +13,16 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
+from .cli_manager import CliManager, CliManagerError
 from .config import (
     AUTH_VARS,
-    build_env_for_active,
+    build_launch_for_active,
     get_lock,
     load_config,
     public_state,
     save_config,
 )
-from .process import ClaudeProcess
+from .process import AgentProcess
 
 # --------------------------------------------------------------------------- #
 # 应用工厂
@@ -30,9 +32,38 @@ from .process import ClaudeProcess
 _PKG_DIR = Path(__file__).resolve().parent
 
 
-def create_app():
+def create_app(*, allow_cli_management=False, cli_manager=None):
     app = Flask(__name__, static_folder=None)
-    claude_proc = ClaudeProcess()
+    agent_proc = AgentProcess()
+    cli_manager = cli_manager or CliManager()
+
+    def terminal_size(data):
+        try:
+            rows = int(data.get("rows", 24))
+            cols = int(data.get("cols", 80))
+        except (TypeError, ValueError):
+            return None, None, "终端尺寸必须是整数"
+        if not (2 <= rows <= 500 and 2 <= cols <= 500):
+            return None, None, "终端尺寸超出范围"
+        return rows, cols, None
+
+    def session_mode(data):
+        mode = data.get("session_mode")
+        if mode:
+            return mode
+        # Compatibility with the original API's Claude argument list.
+        args = data.get("args") or []
+        if args == ["--continue"]:
+            return "continue"
+        if args == ["--resume"]:
+            return "resume"
+        return "new"
+
+    def request_is_loopback():
+        try:
+            return ipaddress.ip_address(request.remote_addr or "").is_loopback
+        except ValueError:
+            return False
 
     # ------------------------------------------------------------------- #
     # 路由
@@ -45,8 +76,60 @@ def create_app():
     @app.get("/api/state")
     def api_state():
         state = public_state()
-        state["claude_status"] = claude_proc.status()
+        state["agent_status"] = agent_proc.status()
+        state["claude_status"] = state["agent_status"]  # backward compatibility
         return jsonify(state)
+
+    @app.get("/api/cli/status")
+    def api_cli_status():
+        state = cli_manager.status()
+        state["management_enabled"] = bool(allow_cli_management)
+        return jsonify(state)
+
+    @app.post("/api/cli/check")
+    def api_cli_check():
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "请求体必须是 JSON 对象"}), 400
+        try:
+            result = cli_manager.latest_versions(data.get("registry", "official"))
+        except CliManagerError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify({"ok": True, **result})
+
+    @app.post("/api/cli/manage")
+    def api_cli_manage():
+        if not request_is_loopback():
+            return jsonify({
+                "ok": False,
+                "error": "CLI 安装/更新只接受回环地址请求；请使用 SSH 隧道",
+            }), 403
+        if not allow_cli_management:
+            return jsonify({
+                "ok": False,
+                "error": "CLI 管理未启用；请用 --allow-cli-management 重启面板",
+            }), 403
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "请求体必须是 JSON 对象"}), 400
+        if agent_proc.status().get("running"):
+            return jsonify({
+                "ok": False,
+                "error": "请先停止正在运行的 Agent，再安装或更新 CLI",
+            }), 409
+        expected = f'{data.get("action", "")}:{data.get("agent", "")}'
+        if data.get("confirm") != expected:
+            return jsonify({"ok": False, "error": "缺少明确操作确认"}), 400
+        try:
+            result = cli_manager.manage(
+                agent=data.get("agent", ""),
+                action=data.get("action", ""),
+                version=data.get("version", "latest"),
+                registry=data.get("registry", "official"),
+            )
+        except CliManagerError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify(result)
 
     @app.post("/api/provider/switch")
     def api_switch_provider():
@@ -57,11 +140,12 @@ def create_app():
             if pid not in cfg["providers"]:
                 return jsonify({"ok": False, "error": "未知供应商"}), 400
             cfg["current_provider"] = pid
+            client = cfg["providers"][pid].get("client", "claude")
             save_config(cfg)
 
         # 若系统存在 ccm，则调用其切换命令（不强制依赖）
         ccm_output = None
-        if shutil.which("ccm"):
+        if client == "claude" and shutil.which("ccm"):
             try:
                 res = subprocess.run(
                     ["ccm", "use", pid],
@@ -164,87 +248,115 @@ def create_app():
             save_config(cfg)
         return jsonify({"ok": True})
 
+    @app.post("/api/agent/start")
     @app.post("/api/claude/start")
-    def api_claude_start():
+    def api_agent_start():
         data = request.get_json(silent=True) or {}
-        args = data.get("args")
-        if isinstance(args, str):
-            args = args.split()
-        rows = int(data.get("rows") or 24)
-        cols = int(data.get("cols") or 80)
-        cwd = (data.get("cwd") or "").strip() or None
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "请求体必须是 JSON 对象"}), 400
+        rows, cols, error = terminal_size(data)
+        if error:
+            return jsonify({"ok": False, "error": error}), 400
+        raw_cwd = data.get("cwd") or ""
+        if not isinstance(raw_cwd, str):
+            return jsonify({"ok": False, "error": "工作目录必须是字符串"}), 400
+        cwd = raw_cwd.strip() or None
 
-        env, label, has_key = build_env_for_active()
-        if not has_key:
-            return jsonify(
-                {"ok": False, "error": f"当前供应商({label})未配置可用 API Key"}
-            ), 400
+        mode = session_mode(data)
+        launch = build_launch_for_active(mode)
+        if not launch.get("ready"):
+            return jsonify({"ok": False, "error": launch["error"]}), 400
         # 记住本次启动参数，供「重启」复用
-        claude_proc.last_launch = {"args": args, "rows": rows, "cols": cols, "cwd": cwd}
-        ok, msg = claude_proc.start(env, label, args=args, rows=rows, cols=cols, cwd=cwd)
-        return jsonify({"ok": ok, "message": msg, "status": claude_proc.status()})
-
-    @app.post("/api/claude/restart")
-    def api_claude_restart():
-        data = request.get_json(silent=True) or {}
-        claude_proc.stop()
-        time.sleep(0.3)
-        env, label, has_key = build_env_for_active()
-        if not has_key:
-            return jsonify(
-                {"ok": False, "error": f"当前供应商({label})未配置可用 API Key"}
-            ), 400
-        # 复用上次启动参数；允许前端用新的终端尺寸覆盖
-        last = dict(getattr(claude_proc, "last_launch", None) or {})
-        if data.get("rows"):
-            last["rows"] = int(data["rows"])
-        if data.get("cols"):
-            last["cols"] = int(data["cols"])
-        ok, msg = claude_proc.start(
-            env, label,
-            args=last.get("args"),
-            rows=last.get("rows", 24),
-            cols=last.get("cols", 80),
-            cwd=last.get("cwd"),
+        agent_proc.last_launch = {
+            "session_mode": mode, "rows": rows, "cols": cols, "cwd": cwd,
+        }
+        ok, msg = agent_proc.start(
+            launch["env"], launch["label"], rows=rows, cols=cols, cwd=cwd,
+            command=launch["command"], clear_env=launch["clear_env"],
+            client=launch["client"],
         )
-        return jsonify({"ok": ok, "message": msg, "status": claude_proc.status()})
+        return jsonify({"ok": ok, "message": msg, "status": agent_proc.status()})
 
+    @app.post("/api/agent/restart")
+    @app.post("/api/claude/restart")
+    def api_agent_restart():
+        data = request.get_json(silent=True) or {}
+        # 先验证全部参数和新 provider，避免无效请求先停掉正在运行的进程。
+        last = dict(getattr(agent_proc, "last_launch", None) or {})
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "请求体必须是 JSON 对象"}), 400
+        merged = {**last, **{k: data[k] for k in ("rows", "cols") if k in data}}
+        rows, cols, error = terminal_size(merged)
+        if error:
+            return jsonify({"ok": False, "error": error}), 400
+        launch = build_launch_for_active(last.get("session_mode", "new"))
+        if not launch.get("ready"):
+            return jsonify({"ok": False, "error": launch["error"]}), 400
+        agent_proc.stop()
+        time.sleep(0.3)
+        ok, msg = agent_proc.start(
+            launch["env"], launch["label"],
+            rows=rows, cols=cols,
+            cwd=last.get("cwd"),
+            command=launch["command"], clear_env=launch["clear_env"],
+            client=launch["client"],
+        )
+        return jsonify({"ok": ok, "message": msg, "status": agent_proc.status()})
+
+    @app.post("/api/agent/resize")
     @app.post("/api/claude/resize")
-    def api_claude_resize():
+    def api_agent_resize():
         data = request.get_json(force=True)
-        claude_proc.set_winsize(data.get("rows", 24), data.get("cols", 80))
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "请求体必须是 JSON 对象"}), 400
+        rows, cols, error = terminal_size(data)
+        if error:
+            return jsonify({"ok": False, "error": error}), 400
+        agent_proc.set_winsize(rows, cols)
         return jsonify({"ok": True})
 
+    @app.post("/api/agent/keepalive")
     @app.post("/api/claude/keepalive")
-    def api_claude_keepalive():
+    def api_agent_keepalive():
         data = request.get_json(force=True)
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "请求体必须是 JSON 对象"}), 400
         enabled = bool(data.get("enabled"))
-        claude_proc.keepalive = enabled
+        agent_proc.keepalive = enabled
         if enabled:
-            claude_proc._fast_fail = 0  # 重新开启时清空熔断计数
+            agent_proc._fast_fail = 0  # 重新开启时清空熔断计数
         return jsonify({"ok": True, "keepalive": enabled})
 
+    @app.post("/api/agent/stop")
     @app.post("/api/claude/stop")
-    def api_claude_stop():
-        ok, msg = claude_proc.stop()
-        return jsonify({"ok": ok, "message": msg, "status": claude_proc.status()})
+    def api_agent_stop():
+        ok, msg = agent_proc.stop()
+        return jsonify({"ok": ok, "message": msg, "status": agent_proc.status()})
 
+    @app.post("/api/agent/input")
     @app.post("/api/claude/input")
-    def api_claude_input():
+    def api_agent_input():
         data = request.get_json(force=True)
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "请求体必须是 JSON 对象"}), 400
         if "raw" in data:
             # xterm 原始按键流（含方向键/控制字符/转义序列），原样透传
             text = data["raw"]
         else:
             text = data.get("text", "")
+            if not isinstance(text, str):
+                return jsonify({"ok": False, "error": "输入必须是字符串"}), 400
             if not text.endswith("\n"):
                 text += "\n"
-        ok, msg = claude_proc.send_input(text)
+        if not isinstance(text, str):
+            return jsonify({"ok": False, "error": "输入必须是字符串"}), 400
+        ok, msg = agent_proc.send_input(text)
         return jsonify({"ok": ok, "message": msg})
 
+    @app.get("/api/agent/status")
     @app.get("/api/claude/status")
-    def api_claude_status():
-        return jsonify(claude_proc.status())
+    def api_agent_status():
+        return jsonify(agent_proc.status())
 
     @app.get("/api/fs/list")
     def api_fs_list():
@@ -267,10 +379,11 @@ def create_app():
             "home": str(Path.home()),
         })
 
+    @app.get("/api/agent/stream")
     @app.get("/api/claude/stream")
-    def api_claude_stream():
+    def api_agent_stream():
         def gen():
-            q = claude_proc.subscribe()
+            q = agent_proc.subscribe()
             try:
                 yield "retry: 3000\n\n"
                 while True:
@@ -281,7 +394,7 @@ def create_app():
                     except Exception:
                         yield ": keepalive\n\n"  # 心跳，保持连接
             finally:
-                claude_proc.unsubscribe(q)
+                agent_proc.unsubscribe(q)
 
         return Response(gen(), mimetype="text/event-stream", headers={
             "Cache-Control": "no-cache",
@@ -289,6 +402,8 @@ def create_app():
             "Connection": "keep-alive",
         })
 
-    # 把 claude_proc 挂到 app 上，供 app.py 清理用
-    app._claude_proc = claude_proc
+    # 挂到 app 上供入口清理；保留旧属性名兼容现有集成。
+    app._agent_proc = agent_proc
+    app._claude_proc = agent_proc
+    app._cli_manager = cli_manager
     return app

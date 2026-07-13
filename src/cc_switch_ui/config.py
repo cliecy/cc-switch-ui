@@ -5,6 +5,7 @@
 import json
 import os
 import shutil
+import tempfile
 import threading
 from pathlib import Path
 
@@ -18,6 +19,7 @@ CONFIG_PATH = Path(os.path.expanduser("~/.ccm_config"))
 DEFAULT_PROVIDERS = {
     "claude": {
         "label": "Claude 官方",
+        "client": "claude",
         "base_url": "https://api.anthropic.com",
         "auth_var": "ANTHROPIC_API_KEY",
         "model": "",
@@ -26,6 +28,7 @@ DEFAULT_PROVIDERS = {
     },
     "deepseek": {
         "label": "DeepSeek",
+        "client": "claude",
         "base_url": "https://api.deepseek.com/anthropic",
         "auth_var": "ANTHROPIC_AUTH_TOKEN",
         "model": "deepseek-chat",
@@ -34,6 +37,7 @@ DEFAULT_PROVIDERS = {
     },
     "kimi": {
         "label": "Kimi (Moonshot)",
+        "client": "claude",
         "base_url": "https://api.moonshot.cn/anthropic",
         "auth_var": "ANTHROPIC_AUTH_TOKEN",
         "model": "kimi-k2-0905-preview",
@@ -42,6 +46,7 @@ DEFAULT_PROVIDERS = {
     },
     "glm": {
         "label": "GLM (智谱)",
+        "client": "claude",
         "base_url": "https://open.bigmodel.cn/api/anthropic",
         "auth_var": "ANTHROPIC_AUTH_TOKEN",
         "model": "glm-4.6",
@@ -50,6 +55,7 @@ DEFAULT_PROVIDERS = {
     },
     "qwen": {
         "label": "Qwen (通义千问)",
+        "client": "claude",
         "base_url": "https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy",
         "auth_var": "ANTHROPIC_AUTH_TOKEN",
         "model": "qwen3-coder-plus",
@@ -58,7 +64,8 @@ DEFAULT_PROVIDERS = {
     },
     "openrouter": {
         "label": "OpenRouter",
-        "base_url": "https://openrouter.ai/api/v1",
+        "client": "claude",
+        "base_url": "https://openrouter.ai/api",
         "auth_var": "ANTHROPIC_AUTH_TOKEN",
         "model": "anthropic/claude-3.5-sonnet",
         "accounts": [],
@@ -66,8 +73,18 @@ DEFAULT_PROVIDERS = {
     },
     "custom": {
         "label": "自定义",
+        "client": "claude",
         "base_url": "",
         "auth_var": "ANTHROPIC_AUTH_TOKEN",
+        "model": "",
+        "accounts": [],
+        "active_account": None,
+    },
+    "codex_custom": {
+        "label": "Codex · 自定义 OpenAI",
+        "client": "codex",
+        "base_url": "",
+        "auth_var": "CC_SWITCH_CODEX_API_KEY",
         "model": "",
         "accounts": [],
         "active_account": None,
@@ -75,6 +92,21 @@ DEFAULT_PROVIDERS = {
 }
 
 AUTH_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+# Provider-related values must not leak from the service process into a newly
+# selected client. Codex receives its custom key through a private env var that
+# is referenced by the per-launch provider configuration.
+ANTHROPIC_ENV_VARS = (
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+)
+CODEX_ENV_VARS = ("CC_SWITCH_CODEX_API_KEY",)
 
 _config_lock = threading.Lock()
 
@@ -117,11 +149,22 @@ def load_config():
 
 
 def save_config(cfg):
-    CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    """Atomically persist config with private permissions from creation time."""
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{CONFIG_PATH.name}.", dir=CONFIG_PATH.parent)
     try:
-        os.chmod(CONFIG_PATH, 0o600)  # 含密钥，限制权限
-    except OSError:
-        pass
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, CONFIG_PATH)
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
 
 
 # --------------------------------------------------------------------------- #
@@ -161,6 +204,7 @@ def public_state():
         out_providers[key] = {
             "id": key,
             "label": p.get("label", key),
+            "client": p.get("client", "claude"),
             "base_url": p.get("base_url", ""),
             "model": p.get("model", ""),
             "auth_var": p.get("auth_var", "ANTHROPIC_API_KEY"),
@@ -172,30 +216,118 @@ def public_state():
         "providers": out_providers,
         "ccm_available": shutil.which("ccm") is not None,
         "claude_available": shutil.which("claude") is not None,
+        "codex_available": shutil.which("codex") is not None,
     }
 
 
 def build_env_for_active():
-    """根据当前供应商 + 激活账号构造注入环境变量。"""
+    """Compatibility wrapper for integrations using the original helper."""
+    launch = build_launch_for_active("new")
+    env = launch.get("env", {})
+    return env, launch.get("label", "?"), bool(env)
+
+
+def _toml_string(value: str) -> str:
+    """Return a safely quoted TOML basic string for a Codex -c override."""
+    return json.dumps(str(value), ensure_ascii=True)
+
+
+def build_launch_for_active(session_mode="new"):
+    """Build a complete, tool-specific launch description for the active provider."""
     cfg = load_config()
     pid = cfg["current_provider"]
     provider = cfg["providers"].get(pid, {})
-    acc = active_account_of(provider)
+    account = active_account_of(provider)
     label = provider.get("label", pid)
+    client = provider.get("client", "claude")
+    base_url = (provider.get("base_url") or "").strip()
+    model = (provider.get("model") or "").strip()
+    api_key = (account.get("api_key") if account else "") or ""
+
+    if session_mode not in ("new", "continue", "resume"):
+        return {"ready": False, "error": "未知会话模式", "label": label, "client": client}
+
+    if client == "codex":
+        if not base_url:
+            return {
+                "ready": False,
+                "error": f"当前供应商({label})未配置 Base URL",
+                "label": label,
+                "client": client,
+            }
+        if not model:
+            return {
+                "ready": False,
+                "error": f"当前供应商({label})未配置模型 ID",
+                "label": label,
+                "client": client,
+            }
+        if not api_key:
+            return {
+                "ready": False,
+                "error": f"当前供应商({label})未配置可用 API Key",
+                "label": label,
+                "client": client,
+            }
+
+        command = ["codex"]
+        if session_mode == "continue":
+            command.extend(("resume", "--last"))
+        elif session_mode == "resume":
+            command.append("resume")
+        command.extend((
+            "-c", 'model_provider="cc_switch_ui"',
+            "-c", f"model_providers.cc_switch_ui.name={_toml_string(label)}",
+            "-c", f"model_providers.cc_switch_ui.base_url={_toml_string(base_url)}",
+            "-c", 'model_providers.cc_switch_ui.env_key="CC_SWITCH_CODEX_API_KEY"',
+            "-c", 'model_providers.cc_switch_ui.wire_api="responses"',
+            "-c", "model_providers.cc_switch_ui.requires_openai_auth=false",
+            "-m", model,
+        ))
+        return {
+            "ready": True,
+            "command": command,
+            "env": {"CC_SWITCH_CODEX_API_KEY": api_key},
+            "clear_env": CODEX_ENV_VARS,
+            "label": label,
+            "client": client,
+        }
 
     env = {}
-    base_url = provider.get("base_url", "")
-    model = provider.get("model", "")
     auth_var = provider.get("auth_var", "ANTHROPIC_API_KEY")
-    api_key = acc.get("api_key", "") if acc else ""
-
     if pid != "claude" and base_url:
         env["ANTHROPIC_BASE_URL"] = base_url
     if api_key:
         env[auth_var] = api_key
+        other_auth_var = (
+            "ANTHROPIC_AUTH_TOKEN"
+            if auth_var == "ANTHROPIC_API_KEY"
+            else "ANTHROPIC_API_KEY"
+        )
+        env[other_auth_var] = ""
     if model:
         env["ANTHROPIC_MODEL"] = model
-    return env, label, bool(api_key)
+    if pid != "claude" and not api_key:
+        return {
+            "ready": False,
+            "error": f"当前供应商({label})未配置可用 API Key",
+            "label": label,
+            "client": client,
+        }
+
+    args = []
+    if session_mode == "continue":
+        args.append("--continue")
+    elif session_mode == "resume":
+        args.append("--resume")
+    return {
+        "ready": True,
+        "command": ["claude", *args],
+        "env": env,
+        "clear_env": ANTHROPIC_ENV_VARS,
+        "label": label,
+        "client": client,
+    }
 
 
 def get_lock():

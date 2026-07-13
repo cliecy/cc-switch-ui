@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 dist/
 *.egg-info/
+.cc-switch.pid
+cc-switch.log
