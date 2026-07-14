@@ -9,6 +9,35 @@ from cc_switch_ui.process import AgentProcess
 
 
 class AgentProcessTests(unittest.TestCase):
+    def test_running_status_exposes_non_secret_launch_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            script = Path(temp_dir) / "fake-agent"
+            script.write_text("#!/bin/sh\ncat >/dev/null\n", encoding="utf-8")
+            script.chmod(0o700)
+            process = AgentProcess()
+
+            ok, _ = process.start(
+                {"SECRET": "not-for-status"},
+                "Custom OpenAI",
+                command=[str(script)],
+                client="codex",
+                launch_snapshot={
+                    "provider_id": "codex_custom",
+                    "provider_label": "Custom OpenAI",
+                    "model": "custom-model",
+                    "account_name": "server",
+                },
+            )
+            status = process.status()
+
+            self.assertTrue(ok)
+            self.assertEqual(status["launch"]["client"], "codex")
+            self.assertEqual(status["launch"]["provider_id"], "codex_custom")
+            self.assertEqual(status["launch"]["account_name"], "server")
+            self.assertNotIn("SECRET", status["launch"])
+            process.stop()
+            process.reader_thread.join(timeout=2)
+
     def test_child_environment_is_sanitized_and_pty_is_closed(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             script = Path(temp_dir) / "fake-agent"

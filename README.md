@@ -15,9 +15,24 @@
 - **内嵌 xterm.js 真终端**：完整渲染 Agent CLI 的交互式 TUI（边框 / 颜色 / 方向键 / 回车），可直接在网页里打字操作
 - **工作目录可选**：启动前用目录选择器（「浏览…」）或手填路径指定 Agent CLI 的运行目录
 - **恢复聊天记录**：启动时可选「新会话 / 继续上次(`--continue`) / 恢复历史(`--resume`)」
+- **运行状态不混淆**：分别显示「正在运行」和「下次启动」，切换连接后会明确提示是否需要重启
+- **启动就绪检查**：每个连接显示缺少的 CLI、Base URL、模型或 API Key；Claude 官方登录不再被误报为缺少账号
 - 深色主题，简洁现代
 
 > 终端用 xterm.js（从 `cdn.jsdelivr.net` 加载）。离线环境会自动降级——供应商/账号管理照常可用，仅终端不可用。
+
+## 先理解两个层次：Agent CLI 与 API 连接
+
+面板不会把 Claude Code 和 Codex 当作同一个程序：
+
+| 层次 | 示例 | 含义 |
+|------|------|------|
+| Agent CLI | Claude Code / Codex CLI | 真正在伪终端中启动的命令 |
+| API 连接 | Claude 官方 / DeepSeek / Codex 自定义 OpenAI | Agent 使用的端点、模型和账号 |
+
+Claude 官方、DeepSeek、Kimi、GLM、Qwen、OpenRouter 和 Anthropic 自定义连接会启动 `claude`；Codex 自定义 OpenAI 连接会启动 `codex`。
+
+界面中的「正在运行」是当前进程的真实快照；「下次启动」是当前选中的配置。Agent 运行时切换连接不会偷偷修改现有进程，必须点击「切换并重启」后才会生效。
 
 ## 运行环境
 
@@ -205,6 +220,8 @@ journalctl --user -u cc-switch -f           # 看日志
 ## 配置文件
 
 `~/.ccm_config`（JSON，权限 `0600`，由本服务读写）。结构示例：
+
+如果配置文件不是有效 JSON，面板会先把原文件保留为 `~/.ccm_config.corrupt-时间戳`，再创建默认配置，并在页面顶部显示恢复提示；不会再静默覆盖唯一副本。
 
 ```json
 {

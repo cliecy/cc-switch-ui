@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 # --------------------------------------------------------------------------- #
@@ -109,6 +110,7 @@ ANTHROPIC_ENV_VARS = (
 CODEX_ENV_VARS = ("CC_SWITCH_CODEX_API_KEY",)
 
 _config_lock = threading.Lock()
+_config_recovery_notice = None
 
 
 # --------------------------------------------------------------------------- #
@@ -123,14 +125,43 @@ def _default_config():
     }
 
 
+def _backup_invalid_config(error):
+    """Preserve an invalid config before creating a clean replacement."""
+    global _config_recovery_notice
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_path = CONFIG_PATH.with_name(f"{CONFIG_PATH.name}.corrupt-{timestamp}")
+    suffix = 1
+    while backup_path.exists():
+        backup_path = CONFIG_PATH.with_name(
+            f"{CONFIG_PATH.name}.corrupt-{timestamp}-{suffix}"
+        )
+        suffix += 1
+    os.replace(CONFIG_PATH, backup_path)
+    try:
+        os.chmod(backup_path, 0o600)
+    except OSError:
+        pass
+    _config_recovery_notice = {
+        "config_path": str(CONFIG_PATH),
+        "message": "配置文件格式无效，已保留备份并恢复默认配置。",
+        "backup_path": str(backup_path),
+        "error": str(error),
+    }
+
+
 def load_config():
     if not CONFIG_PATH.exists():
         cfg = _default_config()
         save_config(cfg)
         return cfg
     try:
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        raw = CONFIG_PATH.read_text(encoding="utf-8")
+        cfg = json.loads(raw)
+        if not isinstance(cfg, dict) or not isinstance(cfg.get("providers", {}), dict):
+            raise ValueError("配置根节点和 providers 必须是 JSON 对象")
+    except (json.JSONDecodeError, ValueError) as exc:
+        _backup_invalid_config(exc)
         cfg = _default_config()
         save_config(cfg)
         return cfg
@@ -187,9 +218,47 @@ def active_account_of(provider: dict):
     return None
 
 
+def provider_readiness(provider_id: str, provider: dict, *, cli_available=None):
+    """Return a user-facing readiness summary without exposing credentials."""
+    client = provider.get("client", "claude")
+    account = active_account_of(provider)
+    missing = []
+    if cli_available is None:
+        cli_available = shutil.which(client) is not None
+    if not cli_available:
+        missing.append(f"{client} CLI")
+
+    base_url = (provider.get("base_url") or "").strip()
+    model = (provider.get("model") or "").strip()
+    api_key = (account.get("api_key") if account else "") or ""
+    if client == "codex":
+        if not base_url:
+            missing.append("Base URL")
+        if not model:
+            missing.append("模型 ID")
+        if not api_key:
+            missing.append("API Key")
+    elif provider_id != "claude":
+        if not base_url:
+            missing.append("Base URL")
+        if not api_key:
+            missing.append("API Key")
+
+    return {
+        "ready": not missing,
+        "missing": missing,
+        "auth_mode": "claude_login" if provider_id == "claude" and not api_key else "api_key",
+        "account_name": account.get("name", "") if account else "",
+    }
+
+
 def public_state():
     """返回给前端的状态（密钥脱敏）。"""
     cfg = load_config()
+    cli_availability = {
+        "claude": shutil.which("claude") is not None,
+        "codex": shutil.which("codex") is not None,
+    }
     out_providers = {}
     for key, p in cfg["providers"].items():
         accounts = [
@@ -210,13 +279,44 @@ def public_state():
             "auth_var": p.get("auth_var", "ANTHROPIC_API_KEY"),
             "accounts": accounts,
             "active_account": p.get("active_account"),
+            "readiness": provider_readiness(
+                key,
+                p,
+                cli_available=cli_availability.get(p.get("client", "claude"), False),
+            ),
+        }
+    current_provider = cfg["current_provider"]
+    selected = out_providers.get(current_provider, {})
+    selected_readiness = selected.get("readiness", {})
+    config_warning = None
+    if (
+        _config_recovery_notice
+        and _config_recovery_notice.get("config_path") == str(CONFIG_PATH)
+    ):
+        config_warning = {
+            key: value
+            for key, value in _config_recovery_notice.items()
+            if key != "config_path"
         }
     return {
-        "current_provider": cfg["current_provider"],
+        "current_provider": current_provider,
         "providers": out_providers,
         "ccm_available": shutil.which("ccm") is not None,
-        "claude_available": shutil.which("claude") is not None,
-        "codex_available": shutil.which("codex") is not None,
+        "claude_available": cli_availability["claude"],
+        "codex_available": cli_availability["codex"],
+        "selected_launch": {
+            "provider_id": current_provider,
+            "provider_label": selected.get("label", current_provider),
+            "client": selected.get("client", "claude"),
+            "base_url": selected.get("base_url", ""),
+            "model": selected.get("model", ""),
+            "account_id": selected.get("active_account"),
+            "account_name": selected_readiness.get("account_name", ""),
+            "auth_mode": selected_readiness.get("auth_mode", "api_key"),
+            "ready": selected_readiness.get("ready", False),
+            "missing": selected_readiness.get("missing", []),
+        },
+        "config_warning": config_warning,
     }
 
 
@@ -243,9 +343,24 @@ def build_launch_for_active(session_mode="new"):
     base_url = (provider.get("base_url") or "").strip()
     model = (provider.get("model") or "").strip()
     api_key = (account.get("api_key") if account else "") or ""
+    metadata = {
+        "provider_id": pid,
+        "provider_label": label,
+        "client": client,
+        "base_url": base_url,
+        "model": model,
+        "account_id": account.get("id") if account else None,
+        "account_name": account.get("name", "") if account else "",
+        "session_mode": session_mode,
+    }
 
     if session_mode not in ("new", "continue", "resume"):
-        return {"ready": False, "error": "未知会话模式", "label": label, "client": client}
+        return {
+            "ready": False,
+            "error": "未知会话模式",
+            "label": label,
+            **metadata,
+        }
 
     if client == "codex":
         if not base_url:
@@ -253,21 +368,21 @@ def build_launch_for_active(session_mode="new"):
                 "ready": False,
                 "error": f"当前供应商({label})未配置 Base URL",
                 "label": label,
-                "client": client,
+                **metadata,
             }
         if not model:
             return {
                 "ready": False,
                 "error": f"当前供应商({label})未配置模型 ID",
                 "label": label,
-                "client": client,
+                **metadata,
             }
         if not api_key:
             return {
                 "ready": False,
                 "error": f"当前供应商({label})未配置可用 API Key",
                 "label": label,
-                "client": client,
+                **metadata,
             }
 
         command = ["codex"]
@@ -290,7 +405,7 @@ def build_launch_for_active(session_mode="new"):
             "env": {"CC_SWITCH_CODEX_API_KEY": api_key},
             "clear_env": CODEX_ENV_VARS,
             "label": label,
-            "client": client,
+            **metadata,
         }
 
     env = {}
@@ -307,12 +422,19 @@ def build_launch_for_active(session_mode="new"):
         env[other_auth_var] = ""
     if model:
         env["ANTHROPIC_MODEL"] = model
+    if pid != "claude" and not base_url:
+        return {
+            "ready": False,
+            "error": f"当前供应商({label})未配置 Base URL",
+            "label": label,
+            **metadata,
+        }
     if pid != "claude" and not api_key:
         return {
             "ready": False,
             "error": f"当前供应商({label})未配置可用 API Key",
             "label": label,
-            "client": client,
+            **metadata,
         }
 
     args = []
@@ -326,7 +448,7 @@ def build_launch_for_active(session_mode="new"):
         "env": env,
         "clear_env": ANTHROPIC_ENV_VARS,
         "label": label,
-        "client": client,
+        **metadata,
     }
 
 

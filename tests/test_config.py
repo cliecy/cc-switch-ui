@@ -2,6 +2,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import cc_switch_ui.config as config
 
@@ -10,10 +11,13 @@ class ConfigTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = config.CONFIG_PATH
+        self.original_recovery_notice = config._config_recovery_notice
         config.CONFIG_PATH = Path(self.temp_dir.name) / ".ccm_config"
+        config._config_recovery_notice = None
 
     def tearDown(self):
         config.CONFIG_PATH = self.original_path
+        config._config_recovery_notice = self.original_recovery_notice
         self.temp_dir.cleanup()
 
     def test_default_config_includes_codex_and_private_permissions(self):
@@ -66,6 +70,9 @@ class ConfigTests(unittest.TestCase):
             launch["command"],
         )
         self.assertEqual(launch["env"], {"CC_SWITCH_CODEX_API_KEY": "secret-key"})
+        self.assertEqual(launch["provider_id"], "codex_custom")
+        self.assertEqual(launch["account_id"], "account-1")
+        self.assertEqual(launch["account_name"], "server")
         self.assertNotIn("OPENAI_API_KEY", launch["clear_env"])
         self.assertNotIn("secret-key", " ".join(launch["command"]))
 
@@ -106,6 +113,51 @@ class ConfigTests(unittest.TestCase):
 
         self.assertNotEqual(account["key_masked"], "secret-key-value")
         self.assertTrue(account["has_key"])
+
+    def test_public_state_distinguishes_ready_claude_login_from_unready_codex(self):
+        config.load_config()
+
+        with mock.patch(
+            "cc_switch_ui.config.shutil.which",
+            side_effect=lambda name: f"/usr/bin/{name}" if name in {"claude", "codex"} else None,
+        ):
+            state = config.public_state()
+
+        self.assertTrue(state["providers"]["claude"]["readiness"]["ready"])
+        self.assertEqual(
+            state["providers"]["claude"]["readiness"]["auth_mode"],
+            "claude_login",
+        )
+        self.assertFalse(state["providers"]["codex_custom"]["readiness"]["ready"])
+        self.assertEqual(state["selected_launch"]["client"], "claude")
+        self.assertEqual(state["selected_launch"]["base_url"], "https://api.anthropic.com")
+
+    def test_invalid_config_is_backed_up_and_reported(self):
+        config.CONFIG_PATH.write_text("{not-json", encoding="utf-8")
+
+        recovered = config.load_config()
+        warning = config.public_state()["config_warning"]
+        backups = list(config.CONFIG_PATH.parent.glob(".ccm_config.corrupt-*"))
+
+        self.assertEqual(recovered["current_provider"], "claude")
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), "{not-json")
+        self.assertEqual(warning["backup_path"], str(backups[0]))
+
+    def test_custom_anthropic_provider_requires_base_url(self):
+        cfg = config.load_config()
+        provider = cfg["providers"]["custom"]
+        provider["accounts"] = [
+            {"id": "account-1", "name": "custom", "api_key": "secret-key"}
+        ]
+        provider["active_account"] = "account-1"
+        cfg["current_provider"] = "custom"
+        config.save_config(cfg)
+
+        launch = config.build_launch_for_active("new")
+
+        self.assertFalse(launch["ready"])
+        self.assertIn("Base URL", launch["error"])
 
 
 if __name__ == "__main__":

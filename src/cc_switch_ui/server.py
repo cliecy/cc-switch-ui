@@ -65,6 +65,33 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
         except ValueError:
             return False
 
+    def launch_snapshot(launch, mode, cwd):
+        """Build the non-secret description shown as the running Agent state."""
+        return {
+            "provider_id": launch.get("provider_id"),
+            "provider_label": launch.get("provider_label", launch.get("label", "?")),
+            "client": launch.get("client", "claude"),
+            "base_url": launch.get("base_url", ""),
+            "model": launch.get("model", ""),
+            "account_id": launch.get("account_id"),
+            "account_name": launch.get("account_name", ""),
+            "session_mode": mode,
+            "cwd": str(Path(cwd or os.getcwd()).expanduser().resolve()),
+        }
+
+    def restart_needed(status, selected_launch):
+        """Whether the running process differs from the selected launch config."""
+        if not status.get("running"):
+            return False
+        running_launch = status.get("launch") or {}
+        if not running_launch:
+            return False
+        fields = ("provider_id", "client", "base_url", "model", "account_id")
+        return any(
+            (running_launch.get(field) or "") != (selected_launch.get(field) or "")
+            for field in fields
+        )
+
     # ------------------------------------------------------------------- #
     # 路由
     # ------------------------------------------------------------------- #
@@ -76,7 +103,11 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
     @app.get("/api/state")
     def api_state():
         state = public_state()
-        state["agent_status"] = agent_proc.status()
+        agent_status = agent_proc.status()
+        state["restart_required"] = restart_needed(
+            agent_status, state["selected_launch"]
+        )
+        state["agent_status"] = agent_status
         state["claude_status"] = state["agent_status"]  # backward compatibility
         return jsonify(state)
 
@@ -155,7 +186,14 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
             except Exception as e:  # noqa: BLE001
                 ccm_output = f"ccm 调用失败: {e}"
 
-        return jsonify({"ok": True, "current_provider": pid, "ccm_output": ccm_output})
+        status = agent_proc.status()
+        selected_launch = public_state()["selected_launch"]
+        return jsonify({
+            "ok": True,
+            "current_provider": pid,
+            "ccm_output": ccm_output,
+            "restart_required": restart_needed(status, selected_launch),
+        })
 
     @app.put("/api/provider/<pid>")
     def api_edit_provider(pid):
@@ -266,14 +304,16 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
         launch = build_launch_for_active(mode)
         if not launch.get("ready"):
             return jsonify({"ok": False, "error": launch["error"]}), 400
+        snapshot = launch_snapshot(launch, mode, cwd)
         # 记住本次启动参数，供「重启」复用
         agent_proc.last_launch = {
             "session_mode": mode, "rows": rows, "cols": cols, "cwd": cwd,
+            "launch": snapshot,
         }
         ok, msg = agent_proc.start(
             launch["env"], launch["label"], rows=rows, cols=cols, cwd=cwd,
             command=launch["command"], clear_env=launch["clear_env"],
-            client=launch["client"],
+            client=launch["client"], launch_snapshot=snapshot,
         )
         return jsonify({"ok": ok, "message": msg, "status": agent_proc.status()})
 
@@ -285,22 +325,41 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
         last = dict(getattr(agent_proc, "last_launch", None) or {})
         if not isinstance(data, dict):
             return jsonify({"ok": False, "error": "请求体必须是 JSON 对象"}), 400
+        mode = (
+            session_mode(data)
+            if "session_mode" in data or "args" in data
+            else last.get("session_mode", "new")
+        )
+        raw_cwd = data.get("cwd", last.get("cwd") or "")
+        if not isinstance(raw_cwd, str):
+            return jsonify({"ok": False, "error": "工作目录必须是字符串"}), 400
+        cwd = raw_cwd.strip() or None
         merged = {**last, **{k: data[k] for k in ("rows", "cols") if k in data}}
         rows, cols, error = terminal_size(merged)
         if error:
             return jsonify({"ok": False, "error": error}), 400
-        launch = build_launch_for_active(last.get("session_mode", "new"))
+        launch = build_launch_for_active(mode)
         if not launch.get("ready"):
             return jsonify({"ok": False, "error": launch["error"]}), 400
+        snapshot = launch_snapshot(launch, mode, cwd)
         agent_proc.stop()
         time.sleep(0.3)
         ok, msg = agent_proc.start(
             launch["env"], launch["label"],
             rows=rows, cols=cols,
-            cwd=last.get("cwd"),
+            cwd=cwd,
             command=launch["command"], clear_env=launch["clear_env"],
-            client=launch["client"],
+            client=launch["client"], launch_snapshot=snapshot,
         )
+        if ok:
+            agent_proc.last_launch = {
+                **last,
+                "rows": rows,
+                "cols": cols,
+                "cwd": cwd,
+                "session_mode": mode,
+                "launch": snapshot,
+            }
         return jsonify({"ok": ok, "message": msg, "status": agent_proc.status()})
 
     @app.post("/api/agent/resize")
@@ -362,16 +421,21 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
     def api_fs_list():
         """列出某目录下的子目录，供前端目录选择器使用。"""
         raw = request.args.get("path", "~")
-        path = Path(os.path.expanduser(raw or "~")).resolve()
+        try:
+            path = Path(os.path.expanduser(raw or "~")).resolve()
+        except OSError as exc:
+            return jsonify({"ok": False, "error": f"无法解析目录：{exc}"}), 400
+        if not path.exists():
+            return jsonify({"ok": False, "error": f"目录不存在：{path}"}), 404
         if not path.is_dir():
-            path = Path.home()
+            return jsonify({"ok": False, "error": f"不是目录：{path}"}), 400
         try:
             dirs = sorted(
                 [p.name for p in path.iterdir() if p.is_dir() and not p.name.startswith(".")],
                 key=str.lower,
             )
         except PermissionError:
-            dirs = []
+            return jsonify({"ok": False, "error": f"无权读取目录：{path}"}), 403
         return jsonify({
             "path": str(path),
             "parent": str(path.parent) if path != path.parent else None,

@@ -28,6 +28,46 @@ class ServerTests(unittest.TestCase):
         self.assertIn("agent_status", data)
         self.assertEqual(data["agent_status"], data["claude_status"])
         self.assertIn("codex_available", data)
+        self.assertEqual(data["selected_launch"]["client"], "claude")
+        self.assertFalse(data["restart_required"])
+
+    def test_state_marks_selected_provider_change_as_restart_required(self):
+        with mock.patch.object(
+            self.app._agent_proc,
+            "status",
+            return_value={
+                "running": True,
+                "launch": {"provider_id": "deepseek", "client": "claude"},
+            },
+        ):
+            data = self.client.get("/api/state").get_json()
+
+        self.assertTrue(data["restart_required"])
+
+    def test_state_marks_same_provider_account_change_as_restart_required(self):
+        with mock.patch.object(
+            self.app._agent_proc,
+            "status",
+            return_value={
+                "running": True,
+                "launch": {
+                    "provider_id": "claude",
+                    "client": "claude",
+                    "base_url": "https://api.anthropic.com",
+                    "model": "",
+                    "account_id": "old-account",
+                },
+            },
+        ):
+            data = self.client.get("/api/state").get_json()
+
+        self.assertTrue(data["restart_required"])
+
+    def test_directory_picker_reports_missing_path(self):
+        response = self.client.get("/api/fs/list?path=/definitely/not/here")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("目录不存在", response.get_json()["error"])
 
     def test_invalid_terminal_dimensions_return_400(self):
         with mock.patch.object(self.app._agent_proc, "stop") as stop:
@@ -36,6 +76,48 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.get_json()["ok"])
         stop.assert_not_called()
+
+    def test_restart_accepts_visible_session_mode_and_directory(self):
+        self.app._agent_proc.last_launch = {
+            "session_mode": "new",
+            "rows": 24,
+            "cols": 80,
+            "cwd": None,
+        }
+        launch = {
+            "ready": True,
+            "env": {},
+            "label": "Claude 官方",
+            "provider_id": "claude",
+            "provider_label": "Claude 官方",
+            "client": "claude",
+            "base_url": "https://api.anthropic.com",
+            "model": "",
+            "account_id": None,
+            "account_name": "",
+            "command": ["claude", "--resume"],
+            "clear_env": (),
+        }
+        with (
+            mock.patch("cc_switch_ui.server.build_launch_for_active", return_value=launch) as build,
+            mock.patch.object(self.app._agent_proc, "stop"),
+            mock.patch.object(self.app._agent_proc, "start", return_value=(True, "已启动")) as start,
+            mock.patch("cc_switch_ui.server.time.sleep"),
+        ):
+            response = self.client.post(
+                "/api/agent/restart",
+                json={
+                    "rows": 30,
+                    "cols": 100,
+                    "cwd": self.temp_dir.name,
+                    "session_mode": "resume",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        build.assert_called_once_with("resume")
+        self.assertEqual(start.call_args.kwargs["cwd"], self.temp_dir.name)
+        self.assertEqual(start.call_args.kwargs["launch_snapshot"]["session_mode"], "resume")
 
     def test_invalid_terminal_input_returns_400(self):
         response = self.client.post("/api/agent/input", json={"raw": 42})

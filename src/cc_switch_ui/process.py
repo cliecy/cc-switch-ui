@@ -39,6 +39,8 @@ class AgentProcess:
         self._last_command = None
         self._last_clear_env = None
         self._last_client = None
+        self._last_launch_snapshot = None
+        self.launch_snapshot = None
 
     # ---- 状态 ----
     def is_running(self):
@@ -57,6 +59,7 @@ class AgentProcess:
             "keepalive": self.keepalive,
             "restart_count": self.restart_count,
             "last_exit_code": self.last_exit_code,
+            "launch": dict(self.launch_snapshot) if running and self.launch_snapshot else None,
         }
 
     # ---- 订阅/广播 ----
@@ -151,6 +154,7 @@ class AgentProcess:
             rows=last.get("rows", 24), cols=last.get("cols", 80),
             cwd=last.get("cwd"), command=self._last_command,
             clear_env=self._last_clear_env, client=self._last_client or "claude",
+            launch_snapshot=self._last_launch_snapshot,
         )
 
     # ---- 终端窗口大小 ----
@@ -168,7 +172,7 @@ class AgentProcess:
     # ---- 生命周期 ----
     def start(
         self, env_extra, provider_label, args=None, rows=24, cols=80, cwd=None,
-        command=None, clear_env=None, client="claude",
+        command=None, clear_env=None, client="claude", launch_snapshot=None,
     ):
         with self.lifecycle_lock:
             if self.is_running():
@@ -220,6 +224,12 @@ class AgentProcess:
             self._last_command = list(cmd)
             self._last_clear_env = tuple(clear_env or ())
             self._last_client = client
+            snapshot = dict(launch_snapshot or {})
+            snapshot.setdefault("provider_label", provider_label)
+            snapshot.setdefault("client", client)
+            snapshot.setdefault("cwd", cwd or os.getcwd())
+            self.launch_snapshot = snapshot
+            self._last_launch_snapshot = dict(snapshot)
             self._stopping = False
             self._broadcast(f"[启动 {client} · 供应商: {provider_label}]\n")
 
