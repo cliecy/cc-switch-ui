@@ -16,8 +16,10 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 from .cli_manager import CliManager, CliManagerError
 from .config import (
     AUTH_VARS,
+    CODEX_AUTH_VAR,
     build_launch_for_active,
     get_lock,
+    launch_fingerprint_for_active,
     load_config,
     public_state,
     save_config,
@@ -79,10 +81,14 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
             "cwd": str(Path(cwd or os.getcwd()).expanduser().resolve()),
         }
 
-    def restart_needed(status, selected_launch):
+    def restart_needed(
+        status, selected_launch, selected_fingerprint=None, running_fingerprint=None
+    ):
         """Whether the running process differs from the selected launch config."""
         if not status.get("running"):
             return False
+        if selected_fingerprint is not None and running_fingerprint is not None:
+            return selected_fingerprint != running_fingerprint
         running_launch = status.get("launch") or {}
         if not running_launch:
             return False
@@ -91,6 +97,22 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
             (running_launch.get(field) or "") != (selected_launch.get(field) or "")
             for field in fields
         )
+
+    def current_state_and_fingerprint():
+        """Read the selected state and its identity from one config snapshot."""
+        with get_lock():
+            cfg = load_config()
+            state = public_state(cfg=cfg)
+            fingerprint = launch_fingerprint_for_active(cfg=cfg)
+        return state, fingerprint
+
+    def current_launch_and_fingerprint(mode):
+        """Build a launch and identity from one config snapshot."""
+        with get_lock():
+            cfg = load_config()
+            launch = build_launch_for_active(mode, cfg=cfg)
+            fingerprint = launch_fingerprint_for_active(cfg=cfg)
+        return launch, fingerprint
 
     # ------------------------------------------------------------------- #
     # 路由
@@ -102,10 +124,13 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
 
     @app.get("/api/state")
     def api_state():
-        state = public_state()
+        state, selected_fingerprint = current_state_and_fingerprint()
         agent_status = agent_proc.status()
         state["restart_required"] = restart_needed(
-            agent_status, state["selected_launch"]
+            agent_status,
+            state["selected_launch"],
+            selected_fingerprint,
+            getattr(agent_proc, "_launch_signature", None),
         )
         state["agent_status"] = agent_status
         state["claude_status"] = state["agent_status"]  # backward compatibility
@@ -187,12 +212,18 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
                 ccm_output = f"ccm 调用失败: {e}"
 
         status = agent_proc.status()
-        selected_launch = public_state()["selected_launch"]
+        state, selected_fingerprint = current_state_and_fingerprint()
+        selected_launch = state["selected_launch"]
         return jsonify({
             "ok": True,
             "current_provider": pid,
             "ccm_output": ccm_output,
-            "restart_required": restart_needed(status, selected_launch),
+            "restart_required": restart_needed(
+                status,
+                selected_launch,
+                selected_fingerprint,
+                getattr(agent_proc, "_launch_signature", None),
+            ),
         })
 
     @app.put("/api/provider/<pid>")
@@ -207,8 +238,16 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
             for field in ("label", "base_url", "model"):
                 if field in data and data[field] is not None:
                     p[field] = str(data[field]).strip()
-            if data.get("auth_var") in AUTH_VARS:
-                p["auth_var"] = data["auth_var"]
+            if "auth_var" in data:
+                auth_var = data["auth_var"]
+                allowed_auth_vars = (
+                    (CODEX_AUTH_VAR,)
+                    if p.get("client") == "codex"
+                    else AUTH_VARS
+                )
+                if auth_var not in allowed_auth_vars:
+                    return jsonify({"ok": False, "error": "不支持的鉴权环境变量"}), 400
+                p["auth_var"] = auth_var
             if not p.get("label"):
                 p["label"] = pid
             save_config(cfg)
@@ -301,7 +340,7 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
         cwd = raw_cwd.strip() or None
 
         mode = session_mode(data)
-        launch = build_launch_for_active(mode)
+        launch, launch_signature = current_launch_and_fingerprint(mode)
         if not launch.get("ready"):
             return jsonify({"ok": False, "error": launch["error"]}), 400
         snapshot = launch_snapshot(launch, mode, cwd)
@@ -314,6 +353,7 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
             launch["env"], launch["label"], rows=rows, cols=cols, cwd=cwd,
             command=launch["command"], clear_env=launch["clear_env"],
             client=launch["client"], launch_snapshot=snapshot,
+            launch_signature=launch_signature,
         )
         return jsonify({"ok": ok, "message": msg, "status": agent_proc.status()})
 
@@ -338,7 +378,7 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
         rows, cols, error = terminal_size(merged)
         if error:
             return jsonify({"ok": False, "error": error}), 400
-        launch = build_launch_for_active(mode)
+        launch, launch_signature = current_launch_and_fingerprint(mode)
         if not launch.get("ready"):
             return jsonify({"ok": False, "error": launch["error"]}), 400
         snapshot = launch_snapshot(launch, mode, cwd)
@@ -350,6 +390,7 @@ def create_app(*, allow_cli_management=False, cli_manager=None):
             cwd=cwd,
             command=launch["command"], clear_env=launch["clear_env"],
             client=launch["client"], launch_snapshot=snapshot,
+            launch_signature=launch_signature,
         )
         if ok:
             agent_proc.last_launch = {

@@ -27,6 +27,7 @@ class AgentProcessTests(unittest.TestCase):
                     "model": "custom-model",
                     "account_name": "server",
                 },
+                launch_signature="private-signature",
             )
             status = process.status()
 
@@ -35,6 +36,9 @@ class AgentProcessTests(unittest.TestCase):
             self.assertEqual(status["launch"]["provider_id"], "codex_custom")
             self.assertEqual(status["launch"]["account_name"], "server")
             self.assertNotIn("SECRET", status["launch"])
+            self.assertEqual(process._launch_signature, "private-signature")
+            self.assertEqual(process._last_launch_signature, "private-signature")
+            self.assertNotIn("private-signature", status["launch"])
             process.stop()
             process.reader_thread.join(timeout=2)
 
@@ -95,6 +99,22 @@ class AgentProcessTests(unittest.TestCase):
             self.assertTrue(process.send_input("ping\n")[0])
             process.stop()
             process.reader_thread.join(timeout=2)
+
+    def test_watchdog_reuses_launch_signature(self):
+        process = AgentProcess()
+        process.proc = object()
+        process.keepalive = True
+        process.started_at = time.time()
+        process.last_launch = {"rows": 30, "cols": 100, "cwd": "/tmp"}
+        process._last_launch_signature = "private-signature"
+
+        with (
+            mock.patch("cc_switch_ui.process.time.sleep"),
+            mock.patch.object(process, "start") as start,
+        ):
+            process._on_exit(process.proc)
+
+        self.assertEqual(start.call_args.kwargs["launch_signature"], "private-signature")
 
 
 if __name__ == "__main__":

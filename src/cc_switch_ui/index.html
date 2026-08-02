@@ -360,7 +360,7 @@
           <div class="cfg-row">
             <label>工作目录</label>
             <div class="cwd-box">
-              <input id="cwd" placeholder="留空 = 启动 app.py 的目录" />
+              <input id="cwd" placeholder="留空 = 当前工作目录" />
               <button class="sm" onclick="openPicker()">浏览…</button>
             </div>
           </div>
@@ -919,6 +919,8 @@ function openProviderEdit(pid) {
   document.getElementById("pm-model").value = p.model;
   document.getElementById("pm-auth").value = p.auth_var || "ANTHROPIC_AUTH_TOKEN";
   const isCodex = p.client === "codex";
+  const codexAuthOption = document.querySelector('#pm-auth option[value="CC_SWITCH_CODEX_API_KEY"]');
+  codexAuthOption.hidden = !isCodex;
   document.getElementById("pm-auth").disabled = isCodex;
   document.getElementById("pm-auth-hint").textContent = isCodex
     ? "Codex 使用 Responses API；密钥通过临时环境变量注入，不改写 ~/.codex/config.toml。"

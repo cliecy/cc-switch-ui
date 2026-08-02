@@ -2,6 +2,7 @@
 配置管理 —— 读写 ~/.ccm_config，管理供应商与账号。
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -16,7 +17,7 @@ from pathlib import Path
 
 CONFIG_PATH = Path(os.path.expanduser("~/.ccm_config"))
 
-# 预置供应商。所有都走 Anthropic 兼容协议，claude 通过环境变量切换后端。
+# 预置供应商：Claude 走 Anthropic 兼容协议，Codex 走 OpenAI Responses 兼容协议。
 DEFAULT_PROVIDERS = {
     "claude": {
         "label": "Claude 官方",
@@ -93,6 +94,7 @@ DEFAULT_PROVIDERS = {
 }
 
 AUTH_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+CODEX_AUTH_VAR = "CC_SWITCH_CODEX_API_KEY"
 
 # Provider-related values must not leak from the service process into a newly
 # selected client. Codex receives its custom key through a private env var that
@@ -107,7 +109,9 @@ ANTHROPIC_ENV_VARS = (
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
     "CLAUDE_CODE_SUBAGENT_MODEL",
 )
-CODEX_ENV_VARS = ("CC_SWITCH_CODEX_API_KEY",)
+CROSS_CLIENT_ENV_VARS = ("OPENAI_API_KEY", CODEX_AUTH_VAR)
+CLAUDE_ENV_VARS = ANTHROPIC_ENV_VARS + CROSS_CLIENT_ENV_VARS
+CODEX_ENV_VARS = ANTHROPIC_ENV_VARS + CROSS_CLIENT_ENV_VARS
 
 _config_lock = threading.Lock()
 _config_recovery_notice = None
@@ -218,6 +222,34 @@ def active_account_of(provider: dict):
     return None
 
 
+def launch_fingerprint_for_active(*, cfg=None):
+    """Return a non-secret identity for the currently selected launch.
+
+    The API key participates only in the digest. The digest is kept inside the
+    service process and is never included in public state or launch snapshots.
+    """
+    cfg = load_config() if cfg is None else cfg
+    provider_id = cfg["current_provider"]
+    provider = cfg["providers"].get(provider_id, {})
+    account = active_account_of(provider)
+    api_key = (account.get("api_key") if account else "") or ""
+    client = provider.get("client", "claude")
+    payload = {
+        "provider_id": provider_id,
+        "client": client,
+        "base_url": (provider.get("base_url") or "").strip(),
+        "model": (provider.get("model") or "").strip(),
+        "account_id": account.get("id") if account else None,
+        "auth_var": provider.get("auth_var", "ANTHROPIC_API_KEY") if api_key else "",
+        "api_key": api_key,
+    }
+    if client == "codex":
+        # Codex receives the provider label as part of its per-launch command.
+        payload["provider_label"] = provider.get("label", provider_id)
+    serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
+
 def provider_readiness(provider_id: str, provider: dict, *, cli_available=None):
     """Return a user-facing readiness summary without exposing credentials."""
     client = provider.get("client", "claude")
@@ -252,9 +284,9 @@ def provider_readiness(provider_id: str, provider: dict, *, cli_available=None):
     }
 
 
-def public_state():
+def public_state(*, cfg=None):
     """返回给前端的状态（密钥脱敏）。"""
-    cfg = load_config()
+    cfg = load_config() if cfg is None else cfg
     cli_availability = {
         "claude": shutil.which("claude") is not None,
         "codex": shutil.which("codex") is not None,
@@ -332,9 +364,9 @@ def _toml_string(value: str) -> str:
     return json.dumps(str(value), ensure_ascii=True)
 
 
-def build_launch_for_active(session_mode="new"):
+def build_launch_for_active(session_mode="new", *, cfg=None):
     """Build a complete, tool-specific launch description for the active provider."""
-    cfg = load_config()
+    cfg = load_config() if cfg is None else cfg
     pid = cfg["current_provider"]
     provider = cfg["providers"].get(pid, {})
     account = active_account_of(provider)
@@ -394,7 +426,7 @@ def build_launch_for_active(session_mode="new"):
             "-c", 'model_provider="cc_switch_ui"',
             "-c", f"model_providers.cc_switch_ui.name={_toml_string(label)}",
             "-c", f"model_providers.cc_switch_ui.base_url={_toml_string(base_url)}",
-            "-c", 'model_providers.cc_switch_ui.env_key="CC_SWITCH_CODEX_API_KEY"',
+            "-c", f'model_providers.cc_switch_ui.env_key="{CODEX_AUTH_VAR}"',
             "-c", 'model_providers.cc_switch_ui.wire_api="responses"',
             "-c", "model_providers.cc_switch_ui.requires_openai_auth=false",
             "-m", model,
@@ -402,7 +434,7 @@ def build_launch_for_active(session_mode="new"):
         return {
             "ready": True,
             "command": command,
-            "env": {"CC_SWITCH_CODEX_API_KEY": api_key},
+            "env": {CODEX_AUTH_VAR: api_key},
             "clear_env": CODEX_ENV_VARS,
             "label": label,
             **metadata,
@@ -446,7 +478,7 @@ def build_launch_for_active(session_mode="new"):
         "ready": True,
         "command": ["claude", *args],
         "env": env,
-        "clear_env": ANTHROPIC_ENV_VARS,
+        "clear_env": CLAUDE_ENV_VARS,
         "label": label,
         **metadata,
     }

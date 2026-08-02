@@ -63,6 +63,78 @@ class ServerTests(unittest.TestCase):
 
         self.assertTrue(data["restart_required"])
 
+    def test_state_marks_active_api_key_change_as_restart_required(self):
+        cfg = config.load_config()
+        provider = cfg["providers"]["claude"]
+        provider["accounts"] = [
+            {"id": "account-1", "name": "main", "api_key": "old-key"}
+        ]
+        provider["active_account"] = "account-1"
+        config.save_config(cfg)
+        self.app._agent_proc._launch_signature = config.launch_fingerprint_for_active()
+
+        running_status = {
+            "running": True,
+            "launch": {
+                "provider_id": "claude",
+                "client": "claude",
+                "base_url": "https://api.anthropic.com",
+                "model": "",
+                "account_id": "account-1",
+            },
+        }
+        with mock.patch.object(self.app._agent_proc, "status", return_value=running_status):
+            response = self.client.put(
+                "/api/account/account-1",
+                json={"provider": "claude", "name": "main", "api_key": "new-key"},
+            )
+            state = self.client.get("/api/state").get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(state["restart_required"])
+
+    def test_state_marks_active_auth_var_change_as_restart_required(self):
+        cfg = config.load_config()
+        provider = cfg["providers"]["claude"]
+        provider["accounts"] = [
+            {"id": "account-1", "name": "main", "api_key": "key"}
+        ]
+        provider["active_account"] = "account-1"
+        config.save_config(cfg)
+        self.app._agent_proc._launch_signature = config.launch_fingerprint_for_active()
+
+        running_status = {
+            "running": True,
+            "launch": {
+                "provider_id": "claude",
+                "client": "claude",
+                "base_url": "https://api.anthropic.com",
+                "model": "",
+                "account_id": "account-1",
+            },
+        }
+        with mock.patch.object(self.app._agent_proc, "status", return_value=running_status):
+            response = self.client.put(
+                "/api/provider/claude",
+                json={"auth_var": "ANTHROPIC_AUTH_TOKEN"},
+            )
+            state = self.client.get("/api/state").get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(state["restart_required"])
+
+    def test_provider_rejects_auth_var_for_wrong_client(self):
+        response = self.client.put(
+            "/api/provider/claude",
+            json={"auth_var": "CC_SWITCH_CODEX_API_KEY"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            config.load_config()["providers"]["claude"]["auth_var"],
+            "ANTHROPIC_API_KEY",
+        )
+
     def test_directory_picker_reports_missing_path(self):
         response = self.client.get("/api/fs/list?path=/definitely/not/here")
 
@@ -78,6 +150,7 @@ class ServerTests(unittest.TestCase):
         stop.assert_not_called()
 
     def test_restart_accepts_visible_session_mode_and_directory(self):
+        cfg = config.load_config()
         self.app._agent_proc.last_launch = {
             "session_mode": "new",
             "rows": 24,
@@ -99,7 +172,12 @@ class ServerTests(unittest.TestCase):
             "clear_env": (),
         }
         with (
+            mock.patch("cc_switch_ui.server.load_config", return_value=cfg) as load,
             mock.patch("cc_switch_ui.server.build_launch_for_active", return_value=launch) as build,
+            mock.patch(
+                "cc_switch_ui.server.launch_fingerprint_for_active",
+                return_value="launch-signature",
+            ) as fingerprint,
             mock.patch.object(self.app._agent_proc, "stop"),
             mock.patch.object(self.app._agent_proc, "start", return_value=(True, "已启动")) as start,
             mock.patch("cc_switch_ui.server.time.sleep"),
@@ -115,9 +193,12 @@ class ServerTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        build.assert_called_once_with("resume")
+        load.assert_called_once_with()
+        build.assert_called_once_with("resume", cfg=cfg)
+        fingerprint.assert_called_once_with(cfg=cfg)
         self.assertEqual(start.call_args.kwargs["cwd"], self.temp_dir.name)
         self.assertEqual(start.call_args.kwargs["launch_snapshot"]["session_mode"], "resume")
+        self.assertEqual(start.call_args.kwargs["launch_signature"], "launch-signature")
 
     def test_invalid_terminal_input_returns_400(self):
         response = self.client.post("/api/agent/input", json={"raw": 42})

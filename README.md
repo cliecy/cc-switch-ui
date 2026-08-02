@@ -243,7 +243,7 @@ journalctl --user -u cc-switch -f           # 看日志
 
 启动 Claude Code 时，后端按当前供应商 + 激活账号注入环境变量：
 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`（或官方的 `ANTHROPIC_API_KEY`）、`ANTHROPIC_MODEL`。
-各供应商的 `base_url` / `model` 均为内置默认值，可在配置文件中按需修改。
+预置的标准 Claude 供应商带有内置 `base_url` / `model`；自定义 Claude 或 Codex 连接需要先填写自己的端点和模型。
 
 Codex 自定义供应商使用临时的 `CC_SWITCH_CODEX_API_KEY`，并通过 CLI 配置覆盖设置 `model_provider`、`base_url`、`env_key` 和 `wire_api = "responses"`。不同客户端的鉴权和路由环境变量会在启动前清理，避免供应商之间串线。
 

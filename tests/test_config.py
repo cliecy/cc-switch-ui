@@ -73,7 +73,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(launch["provider_id"], "codex_custom")
         self.assertEqual(launch["account_id"], "account-1")
         self.assertEqual(launch["account_name"], "server")
-        self.assertNotIn("OPENAI_API_KEY", launch["clear_env"])
+        self.assertIn("ANTHROPIC_API_KEY", launch["clear_env"])
+        self.assertIn("ANTHROPIC_BASE_URL", launch["clear_env"])
+        self.assertIn("OPENAI_API_KEY", launch["clear_env"])
+        self.assertIn("CC_SWITCH_CODEX_API_KEY", launch["clear_env"])
         self.assertNotIn("secret-key", " ".join(launch["command"]))
 
     def test_official_claude_can_use_existing_login_without_api_key(self):
@@ -84,6 +87,52 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(launch["ready"])
         self.assertEqual(launch["command"], ["claude"])
         self.assertEqual(launch["env"], {})
+        self.assertIn("OPENAI_API_KEY", launch["clear_env"])
+        self.assertIn("CC_SWITCH_CODEX_API_KEY", launch["clear_env"])
+
+    def test_launch_fingerprint_changes_for_active_credentials(self):
+        cfg = config.load_config()
+        provider = cfg["providers"]["claude"]
+        provider["accounts"] = [
+            {"id": "account-1", "name": "main", "api_key": "first-key"}
+        ]
+        provider["active_account"] = "account-1"
+        config.save_config(cfg)
+
+        first = config.launch_fingerprint_for_active()
+        provider["accounts"][0]["api_key"] = "second-key"
+        config.save_config(cfg)
+        second = config.launch_fingerprint_for_active()
+        provider["auth_var"] = "ANTHROPIC_AUTH_TOKEN"
+        config.save_config(cfg)
+        third = config.launch_fingerprint_for_active()
+
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(second, third)
+
+    def test_codex_provider_label_is_part_of_launch_fingerprint(self):
+        cfg = config.load_config()
+        provider = cfg["providers"]["codex_custom"]
+        provider["label"] = "Codex Old Label"
+        provider["base_url"] = "https://proxy.example.com/v1"
+        provider["model"] = "custom-coder"
+        provider["accounts"] = [
+            {"id": "account-1", "name": "server", "api_key": "secret-key"}
+        ]
+        provider["active_account"] = "account-1"
+        cfg["current_provider"] = "codex_custom"
+        config.save_config(cfg)
+
+        first = config.launch_fingerprint_for_active()
+        first_command = config.build_launch_for_active()["command"]
+        provider["label"] = "Codex New Label"
+        config.save_config(cfg)
+        second = config.launch_fingerprint_for_active()
+        second_command = config.build_launch_for_active()["command"]
+
+        self.assertNotEqual(first, second)
+        self.assertIn('model_providers.cc_switch_ui.name="Codex Old Label"', first_command)
+        self.assertIn('model_providers.cc_switch_ui.name="Codex New Label"', second_command)
 
     def test_anthropic_token_provider_clears_conflicting_api_key(self):
         cfg = config.load_config()

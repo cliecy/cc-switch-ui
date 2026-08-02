@@ -20,6 +20,8 @@ class AssetTests(unittest.TestCase):
         self.assertIn('id="switch-notice"', frontend)
         self.assertIn('role="dialog"', frontend)
         self.assertIn('type="password"', frontend)
+        self.assertIn("codexAuthOption.hidden = !isCodex", frontend)
+        self.assertIn("留空 = 当前工作目录", frontend)
 
 
 if __name__ == "__main__":

@@ -40,6 +40,8 @@ class AgentProcess:
         self._last_clear_env = None
         self._last_client = None
         self._last_launch_snapshot = None
+        self._last_launch_signature = None
+        self._launch_signature = None
         self.launch_snapshot = None
 
     # ---- 状态 ----
@@ -155,6 +157,7 @@ class AgentProcess:
             cwd=last.get("cwd"), command=self._last_command,
             clear_env=self._last_clear_env, client=self._last_client or "claude",
             launch_snapshot=self._last_launch_snapshot,
+            launch_signature=self._last_launch_signature,
         )
 
     # ---- 终端窗口大小 ----
@@ -173,6 +176,7 @@ class AgentProcess:
     def start(
         self, env_extra, provider_label, args=None, rows=24, cols=80, cwd=None,
         command=None, clear_env=None, client="claude", launch_snapshot=None,
+        launch_signature=None,
     ):
         with self.lifecycle_lock:
             if self.is_running():
@@ -224,6 +228,8 @@ class AgentProcess:
             self._last_command = list(cmd)
             self._last_clear_env = tuple(clear_env or ())
             self._last_client = client
+            self._launch_signature = launch_signature
+            self._last_launch_signature = launch_signature
             snapshot = dict(launch_snapshot or {})
             snapshot.setdefault("provider_label", provider_label)
             snapshot.setdefault("client", client)
