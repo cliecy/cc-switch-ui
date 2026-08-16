@@ -43,6 +43,10 @@
   header h1 { font-size: 20px; font-weight: 650; letter-spacing: .2px; }
   header .sub { color: var(--text-dim); font-size: 13px; }
   .topbar { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+  .connection-alert {
+    color: var(--yellow); font-size: 12px; padding: 4px 8px;
+    border: 1px solid var(--yellow); border-radius: 8px; background: #3d332055;
+  }
 
   .config-warning {
     display: none; margin-top: 14px; padding: 12px 14px; border-radius: 10px;
@@ -51,35 +55,55 @@
   }
   .config-warning.show { display: block; }
 
-  .grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 18px; margin-top: 22px; }
-  @media (max-width: 920px) { .grid { grid-template-columns: 1fr; } }
+  .view-tabs { display: flex; gap: 8px; margin: 18px 0; }
+  .view-tabs button[aria-selected="true"] {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  [hidden] { display: none !important; }
+  .view-panel, .run-grid, .run-grid > *, .tools-stack { min-width: 0; }
+  .run-grid {
+    display: grid; grid-template-columns: minmax(320px, .8fr) minmax(0, 1.4fr);
+    gap: 18px; align-items: start;
+  }
+  .tools-stack { display: flex; flex-direction: column; gap: 18px; }
 
   .card {
-    background: var(--bg-soft);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 18px;
+    min-width: 0; background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px;
   }
   .card h2 {
     font-size: 14px; font-weight: 600; color: var(--text);
     margin-bottom: 14px; display: flex; align-items: center; gap: 8px;
   }
-  .card h2 .dim { color: var(--text-dim); font-weight: 400; font-size: 12px; margin-left: auto; }
-
-  /* 供应商列表 */
-  .providers { display: flex; flex-direction: column; gap: 10px; }
+  .card h2 .dim {
+    color: var(--text-dim); font-weight: 400; font-size: 12px; margin-left: auto;
+  }
+  /* 连接列表 */
   .provider-intro { color: var(--text-dim); font-size: 12px; margin: -6px 0 12px; }
-  .provider-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .provider-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+  .provider-toolbar > span { color: var(--text-dim); font-size: 12px; }
+  .provider-filter { display: flex; flex-wrap: wrap; gap: 6px; }
   .provider-filter button[aria-pressed="true"] {
     background: var(--accent-soft); border-color: var(--accent); color: #fff;
   }
+  .provider-section + .provider-section { margin-top: 18px; }
+  .provider-section-title {
+    color: var(--text-dim); font-size: 12px; font-weight: 600;
+    letter-spacing: .3px; margin-bottom: 9px;
+  }
+  .provider-empty {
+    color: var(--text-dim); font-size: 13px; text-align: center;
+    padding: 20px 12px; border: 1px dashed var(--border); border-radius: 10px;
+  }
+  .provider-catalog-toggle { margin-top: 12px; }
+  .provider-catalog { margin-top: 16px; }
   .provider {
-    border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
-    cursor: pointer; transition: .15s; background: var(--bg-elev);
+    min-width: 0; border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; cursor: pointer; transition: .15s; background: var(--bg-elev);
   }
   .provider:hover { border-color: #3d4a5c; }
   .provider.active { border-color: var(--accent); background: var(--accent-soft); }
-  .provider .row { display: flex; align-items: center; gap: 10px; }
+  .provider .row { min-width: 0; display: flex; align-items: center; gap: 10px; }
   .provider-expander {
     display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0;
     background: transparent; color: inherit; font-size: inherit;
@@ -99,17 +123,17 @@
   .badge.warn { background: #3d3320; color: var(--yellow); }
 
   /* 账号 */
-  .accounts { margin-top: 10px; display: none; flex-direction: column; gap: 6px; }
+  .accounts { min-width: 0; margin-top: 10px; display: none; flex-direction: column; gap: 6px; }
   .provider.expanded .accounts { display: flex; }
   .account {
-    display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 10px;
     background: var(--bg-soft); border: 1px solid var(--border); border-radius: 8px;
     font-size: 13px;
   }
   .account .dot { width: 8px; height: 8px; border-radius: 50%; background: #444; flex: none; }
   .account.active .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
   .account .key { font-family: var(--mono); color: var(--text-dim); font-size: 12px; }
-  .account .acts { margin-left: auto; display: flex; gap: 6px; }
+  .account .acts { min-width: 0; margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
 
   button {
     font-family: inherit; font-size: 13px; border: 1px solid var(--border);
@@ -131,12 +155,11 @@
 
   .icon-btn { padding: 6px 9px; }
 
-  /* 进程控制 + 状态 */
-  .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
-  .agent-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  /* 运行控制 + 状态 */
+  .agent-stack { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
   .agent-summary {
-    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
-    padding: 12px 13px; min-width: 0;
+    min-width: 0; background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 13px;
   }
   .agent-summary.running { border-color: #3fb95066; }
   .agent-summary.next { border-color: #d9775766; }
@@ -148,6 +171,8 @@
   .summary-main { font-size: 15px; font-weight: 650; margin-bottom: 5px; }
   .summary-line { color: var(--text-dim); font-size: 12px; overflow-wrap: anywhere; }
   .summary-line strong { color: var(--text); font-weight: 500; }
+  .summary-action { margin-top: 10px; }
+  .run-meta { color: var(--text-dim); font-size: 11px; margin-top: 8px; }
   .switch-notice {
     display: none; align-items: center; gap: 10px; margin-bottom: 12px; padding: 10px 12px;
     border: 1px solid var(--yellow); background: #3d332055; border-radius: 9px;
@@ -155,16 +180,12 @@
   }
   .switch-notice.show { display: flex; }
   .switch-notice button { margin-left: auto; flex: none; }
-  .stat { background: var(--bg-elev); border: 1px solid var(--border);
-          border-radius: 10px; padding: 11px 13px; }
-  .stat .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
-  .stat .val { font-size: 16px; font-weight: 600; margin-top: 3px; }
-  .stat .val.run { color: var(--green); }
-  .stat .val.stop { color: var(--text-dim); }
 
   .ctrl-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
-  .ka-toggle { display: flex; align-items: center; gap: 5px; margin-left: auto;
-               font-size: 13px; color: var(--text-dim); cursor: pointer; user-select: none; }
+  .ka-toggle {
+    display: flex; align-items: center; gap: 5px; margin-left: auto;
+    font-size: 13px; color: var(--text-dim); cursor: pointer; user-select: none;
+  }
   .ka-toggle input { width: auto; }
   .ka-info { font-size: 12px; color: var(--text-dim); min-height: 16px; margin-bottom: 8px; }
   .ka-info .hot { color: var(--green); }
@@ -173,8 +194,9 @@
 
   /* 终端 (xterm) */
   .term {
-    background: #000; border: 1px solid var(--border); border-radius: 10px;
-    height: 440px; padding: 8px 6px 4px 10px; overflow: hidden;
+    min-width: 0; background: #000; border: 1px solid var(--border); border-radius: 10px;
+    height: min(620px, calc(100vh - 210px)); min-height: 440px;
+    padding: 8px 6px 4px 10px; overflow: hidden;
   }
   .term.fs {
     position: fixed; inset: 0; z-index: 200; height: 100vh; width: 100vw;
@@ -190,13 +212,13 @@
 
   /* 启动配置 */
   .launch-cfg { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
-  .cfg-row { display: flex; gap: 8px; align-items: center; }
+  .cfg-row { min-width: 0; display: flex; gap: 8px; align-items: center; }
   .cfg-row label { font-size: 12px; color: var(--text-dim); width: 64px; flex: none; }
-  .seg { display: flex; gap: 6px; }
+  .seg { min-width: 0; display: flex; gap: 6px; }
   .seg button { flex: 1; }
   .seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .cwd-box { flex: 1; display: flex; gap: 6px; }
-  .cwd-box input { flex: 1; font-family: var(--mono); font-size: 12px; }
+  .cwd-box { min-width: 0; flex: 1; display: flex; gap: 6px; }
+  .cwd-box input { min-width: 0; flex: 1; font-family: var(--mono); font-size: 12px; }
 
   /* 目录选择器 */
   .picker { max-height: 240px; overflow-y: auto; border: 1px solid var(--border);
@@ -245,19 +267,37 @@
   .field { margin-bottom: 14px; }
   .field label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
   .modal-acts { display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px; }
+  .environment-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;
+  }
+  .environment-item {
+    min-width: 0; border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; background: var(--bg-elev);
+  }
+  .environment-item .label { color: var(--text-dim); font-size: 11px; margin-bottom: 5px; }
+  .environment-item .value { font-size: 13px; overflow-wrap: anywhere; }
   .cli-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
-  .cli-tool { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--bg-elev); }
+  .cli-tool {
+    min-width: 0; border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; background: var(--bg-elev);
+  }
   .cli-tool h4 { font-size: 14px; margin-bottom: 5px; }
   .cli-meta { min-height: 48px; color: var(--text-dim); font-size: 11px; word-break: break-all; }
   .cli-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .cli-output { max-height: 130px; overflow: auto; white-space: pre-wrap; font-family: var(--mono);
-                font-size: 11px; color: var(--text-dim); background: #090c10; padding: 9px;
-                border-radius: 8px; margin-top: 10px; display: none; }
+  .cli-output {
+    max-height: 180px; overflow: auto; white-space: pre-wrap; font-family: var(--mono);
+    font-size: 11px; color: var(--text-dim); background: #090c10; padding: 9px;
+    border-radius: 8px; margin-top: 10px; display: none;
+  }
+  .tool-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
   .notice { color: var(--text-dim); font-size: 12px; margin: 8px 0; }
   .notice.warn { color: var(--yellow); }
   .sr-only {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+  @media (max-width: 920px) {
+    .run-grid { grid-template-columns: 1fr; }
   }
   @media (max-width: 620px) {
     .wrap { padding: 16px 12px 40px; }
@@ -265,7 +305,9 @@
     header > div:nth-child(2) { min-width: 0; flex: 1; }
     header h1 .sub { display: block; margin-top: 2px; }
     .topbar { width: 100%; margin-left: 0; justify-content: flex-end; flex-wrap: wrap; }
-    .cli-tools, .agent-summary-grid { grid-template-columns: 1fr; }
+    .view-tabs { width: 100%; }
+    .view-tabs button { min-width: 0; flex: 1 1 0; padding-inline: 6px; }
+    .cli-tools, .environment-grid { grid-template-columns: 1fr; }
     .card { padding: 14px; }
     .cfg-row { align-items: stretch; flex-direction: column; }
     .cfg-row label { width: auto; }
@@ -276,10 +318,8 @@
     .provider-expander { flex: 1 1 auto; }
     .switch-notice { align-items: flex-start; flex-direction: column; }
     .switch-notice button { margin-left: 0; }
-    .term { height: min(440px, 58vh); }
+    .term { height: min(440px, 58vh); min-height: 0; }
   }
-  .dot-live { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); display: inline-block; }
-  .dot-live.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
 </style>
 </head>
 <body>
@@ -288,115 +328,171 @@
     <div class="logo">CC</div>
     <div>
       <h1>CC Switch <span class="sub">· Claude Code / Codex 管理面板</span></h1>
-      <div class="sub" id="env-line">加载中…</div>
+      <div class="sub">本地 Agent 工作台</div>
     </div>
     <div class="topbar">
-      <span class="dot-live" id="sse-dot" title="终端实时连接"></span>
-      <span class="sub" id="sse-label" aria-live="polite">正在连接终端…</span>
-      <button class="ghost sm" onclick="openCliManager()">CLI 安装/版本</button>
+      <span class="connection-alert" id="sse-alert" role="status" aria-live="polite" hidden></span>
       <button class="ghost sm" onclick="refresh()">↻ 刷新</button>
     </div>
   </header>
   <div class="config-warning" id="config-warning" role="alert"></div>
 
-  <div class="grid">
-    <!-- 左：供应商 / 账号 -->
-    <div class="card">
-      <h2>连接 &amp; 账号 <span class="dim" id="current-label"></span></h2>
-      <div class="provider-intro">先选择 Agent CLI，再选择它使用的 API 连接。切换连接只影响下次启动或重启。</div>
-      <div class="provider-filter" aria-label="按 Agent CLI 筛选连接">
-        <button class="sm" data-client="all" aria-pressed="true" onclick="setAgentFilter('all')">全部</button>
-        <button class="sm" data-client="claude" aria-pressed="false" onclick="setAgentFilter('claude')">Claude Code</button>
-        <button class="sm" data-client="codex" aria-pressed="false" onclick="setAgentFilter('codex')">Codex CLI</button>
-      </div>
-      <div class="providers" id="providers"></div>
-    </div>
+  <nav class="view-tabs" role="tablist" aria-label="主要功能">
+    <button id="tab-run" role="tab" data-view="run" aria-controls="view-run"
+            aria-selected="true" onclick="switchView('run')">运行</button>
+    <button id="tab-connections" role="tab" data-view="connections" aria-controls="view-connections"
+            aria-selected="false" onclick="switchView('connections')">连接与账号</button>
+    <button id="tab-tools" role="tab" data-view="tools" aria-controls="view-tools"
+            aria-selected="false" onclick="switchView('tools')">工具</button>
+  </nav>
 
-    <!-- 右：进程 + 状态 + 终端 -->
-    <div>
-      <div class="card" style="margin-bottom:18px;">
-        <h2>Agent 状态 <span class="dim">运行中与下次启动分开显示</span></h2>
-        <div class="agent-summary-grid">
-          <section class="agent-summary running" aria-labelledby="running-title">
-            <div class="summary-title" id="running-title"><span>正在运行</span><span id="run-state-badge" class="badge">未运行</span></div>
-            <div class="summary-main" id="run-agent">没有运行中的 Agent</div>
-            <div class="summary-line">连接：<strong id="run-connection">—</strong></div>
-            <div class="summary-line">模型：<strong id="run-model">—</strong></div>
-            <div class="summary-line">账号：<strong id="run-account">—</strong></div>
-            <div class="summary-line">目录：<strong id="run-cwd">—</strong></div>
-          </section>
-          <section class="agent-summary next" aria-labelledby="next-title">
-            <div class="summary-title" id="next-title"><span>下次启动</span><span id="next-ready" class="badge">检查中</span></div>
-            <div class="summary-main" id="next-agent">—</div>
-            <div class="summary-line">连接：<strong id="next-connection">—</strong></div>
-            <div class="summary-line">模型：<strong id="next-model">CLI 默认</strong></div>
-            <div class="summary-line">账号：<strong id="next-account">—</strong></div>
-            <div class="summary-line" id="next-missing"></div>
-          </section>
-        </div>
-        <div class="switch-notice" id="switch-notice" role="status">
-          <span id="switch-notice-text"></span>
-          <button class="sm" id="btn-apply-switch" onclick="claudeAction('restart')">应用并重启</button>
-        </div>
-        <div class="status-grid">
-          <div class="stat">
-            <div class="label">进程</div>
-            <div class="val stop" id="st-run">未运行</div>
+  <main>
+    <section class="view-panel" id="view-run" role="tabpanel" aria-labelledby="tab-run">
+      <div class="run-grid">
+        <div class="card">
+          <h2>Agent 控制 <span class="dim">启动配置与运行状态</span></h2>
+          <div class="agent-stack">
+            <section class="agent-summary running" id="running-summary"
+                     aria-labelledby="running-title" hidden>
+              <div class="summary-title" id="running-title">
+                <span>正在运行</span><span id="run-state-badge" class="badge on">运行中</span>
+              </div>
+              <div class="summary-main" id="run-agent">—</div>
+              <div class="summary-line">连接：<strong id="run-connection">—</strong></div>
+              <div class="summary-line">模型：<strong id="run-model">—</strong></div>
+              <div class="summary-line">账号：<strong id="run-account">—</strong></div>
+              <div class="summary-line">目录：<strong id="run-cwd">—</strong></div>
+              <div class="run-meta" id="run-meta"></div>
+            </section>
+            <section class="agent-summary next" aria-labelledby="next-title">
+              <div class="summary-title" id="next-title">
+                <span>下次启动</span><span id="next-ready" class="badge">检查中</span>
+              </div>
+              <div class="summary-main" id="next-agent">—</div>
+              <div class="summary-line">连接：<strong id="next-connection">—</strong></div>
+              <div class="summary-line">模型：<strong id="next-model">CLI 默认</strong></div>
+              <div class="summary-line">账号：<strong id="next-account">—</strong></div>
+              <div class="summary-line" id="next-missing"></div>
+              <div class="summary-action">
+                <button class="sm ghost" onclick="openConnectionsForSelected()">更改连接</button>
+              </div>
+            </section>
           </div>
-          <div class="stat">
-            <div class="label">PID</div>
-            <div class="val" id="st-pid">—</div>
+          <div class="switch-notice" id="switch-notice" role="status">
+            <span id="switch-notice-text"></span>
+            <button class="sm" id="btn-apply-switch" onclick="claudeAction('restart')">切换并重启</button>
           </div>
-          <div class="stat">
-            <div class="label">运行连接</div>
-            <div class="val" id="st-provider" style="font-size:14px;">—</div>
-          </div>
-          <div class="stat">
-            <div class="label">运行时长</div>
-            <div class="val" id="st-uptime" style="font-size:14px;">—</div>
-          </div>
-        </div>
-        <div class="launch-cfg">
-          <div class="cfg-row">
-            <label>工作目录</label>
-            <div class="cwd-box">
-              <input id="cwd" placeholder="留空 = 当前工作目录" />
-              <button class="sm" onclick="openPicker()">浏览…</button>
+          <div class="launch-cfg">
+            <div class="cfg-row">
+              <label for="cwd">工作目录</label>
+              <div class="cwd-box">
+                <input id="cwd" placeholder="留空 = 当前工作目录" />
+                <button class="sm" onclick="openPicker()">浏览…</button>
+              </div>
+            </div>
+            <div class="cfg-row">
+              <label>会话</label>
+              <div class="seg" id="session-seg">
+                <button class="sm on" data-mode="new" onclick="setMode(this)">新会话</button>
+                <button class="sm" data-mode="continue" onclick="setMode(this)">继续上次</button>
+                <button class="sm" data-mode="resume" onclick="setMode(this)">恢复历史…</button>
+              </div>
             </div>
           </div>
-          <div class="cfg-row">
-            <label>会话</label>
-            <div class="seg" id="session-seg">
-              <button class="sm on" data-mode="new" onclick="setMode(this)">新会话</button>
-              <button class="sm" data-mode="continue" onclick="setMode(this)">继续上次</button>
-              <button class="sm" data-mode="resume" onclick="setMode(this)">恢复历史…</button>
-            </div>
+          <div class="ctrl-row">
+            <button class="primary" id="btn-start" onclick="claudeAction('start')">▶ 启动</button>
+            <button id="btn-restart" onclick="claudeAction('restart')" hidden>⟳ 重启</button>
+            <button id="btn-stop" onclick="claudeAction('stop')" hidden>■ 停止</button>
+            <label class="ka-toggle" title="进程意外退出时自动重启">
+              <input type="checkbox" id="ka" onchange="toggleKeepalive()" />
+              <span>保活</span>
+            </label>
           </div>
+          <div class="ka-info" id="ka-info"></div>
+          <div class="action-error" id="action-error" role="alert"></div>
         </div>
-        <div class="ctrl-row">
-          <button class="primary" id="btn-start" onclick="claudeAction('start')">▶ 启动</button>
-          <button id="btn-restart" onclick="claudeAction('restart')">⟳ 重启</button>
-          <button id="btn-stop" onclick="claudeAction('stop')">■ 停止</button>
-          <label class="ka-toggle" title="进程意外退出时自动重启">
-            <input type="checkbox" id="ka" onchange="toggleKeepalive()" />
-            <span>保活</span>
-          </label>
-        </div>
-        <div class="ka-info" id="ka-info"></div>
-        <div class="action-error" id="action-error" role="alert"></div>
-      </div>
 
+        <div class="card">
+          <h2>Agent 终端
+            <span style="color:var(--text-dim);font-weight:400;font-size:12px;">实时 · 可直接交互</span>
+            <button class="sm ghost" id="fs-btn" style="margin-left:auto;font-size:12px;"
+                    onclick="toggleFullscreen()">⛶ 全屏</button>
+          </h2>
+          <div class="term" id="term"></div>
+          <div class="term-hint" id="term-hint">提示：启动 Agent 后，点一下终端即可直接输入、使用方向键和回车。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view-panel" id="view-connections" role="tabpanel"
+             aria-labelledby="tab-connections" hidden>
       <div class="card">
-        <h2>Agent 终端
-          <span style="color:var(--text-dim);font-weight:400;font-size:12px;">实时 · 可直接交互</span>
-          <button class="sm ghost" id="fs-btn" style="margin-left:auto;font-size:12px;"
-                  onclick="toggleFullscreen()">⛶ 全屏</button>
-        </h2>
-        <div class="term" id="term"></div>
-        <div class="term-hint" id="term-hint">提示：启动 Agent 后，点一下终端即可直接输入、使用方向键和回车。</div>
+        <h2>连接与账号 <span class="dim" id="current-label"></span></h2>
+        <div class="provider-intro">管理下次启动使用的 API 连接和账号；不会偷偷修改正在运行的 Agent。</div>
+        <div class="provider-toolbar">
+          <span>查看连接：</span>
+          <div class="provider-filter" aria-label="按运行程序查看连接">
+            <button class="sm" data-client="claude" aria-pressed="false"
+                    onclick="setAgentFilter('claude')">Claude Code</button>
+            <button class="sm" data-client="codex" aria-pressed="false"
+                    onclick="setAgentFilter('codex')">Codex CLI</button>
+          </div>
+        </div>
+        <div class="provider-section">
+          <div class="provider-section-title">我的连接</div>
+          <div class="providers" id="providers"></div>
+          <div class="provider-empty" id="providers-empty" hidden></div>
+        </div>
+        <button class="sm ghost provider-catalog-toggle" id="provider-catalog-toggle"
+                onclick="toggleProviderCatalog()">+ 添加或配置连接</button>
+        <div class="provider-section provider-catalog" id="provider-catalog" hidden>
+          <div class="provider-section-title">可添加的连接</div>
+          <div class="providers" id="provider-catalog-list"></div>
+        </div>
       </div>
-    </div>
-  </div>
+    </section>
+
+    <section class="view-panel" id="view-tools" role="tabpanel" aria-labelledby="tab-tools" hidden>
+      <div class="tools-stack">
+        <div class="card">
+          <h2>本机环境 <span class="dim">运行程序与配置助手</span></h2>
+          <div class="environment-grid">
+            <div class="environment-item">
+              <div class="label">Claude Code</div>
+              <div class="value" id="env-claude">检查中…</div>
+            </div>
+            <div class="environment-item">
+              <div class="label">Codex CLI</div>
+              <div class="value" id="env-codex">检查中…</div>
+            </div>
+            <div class="environment-item">
+              <div class="label">ccm</div>
+              <div class="value" id="env-ccm">检查中…</div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Agent CLI 安装与版本管理</h2>
+          <div class="field">
+            <label for="cli-registry">npm 下载源</label>
+            <select id="cli-registry" onchange="renderCliRegistryWarning()">
+              <option value="official">npm 官方源</option>
+              <option value="china">npmmirror 中国镜像（第三方）</option>
+            </select>
+          </div>
+          <div class="notice warn" id="cli-registry-warning" style="display:none;">
+            第三方镜像可能更适合中国网络，但存在同步延迟和供应链风险；安装前请核对包名与版本。
+          </div>
+          <div class="notice" id="cli-management-note">进入工具页后读取本机 CLI 状态。</div>
+          <div class="cli-tools" id="cli-tools"></div>
+          <div class="cli-output" id="cli-output"></div>
+          <div class="tool-actions">
+            <button id="btn-check-cli" onclick="checkCliVersions()">查询最新版</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
 
 <!-- 账号弹窗 -->
@@ -466,29 +562,6 @@
   </div>
 </div>
 
-<!-- CLI 安装与版本管理 -->
-<div class="modal-bg" id="cli-modal" aria-hidden="true">
-  <div class="modal" style="max-width:720px;" role="dialog" aria-modal="true" aria-labelledby="cli-title" tabindex="-1">
-    <h3 id="cli-title">Agent CLI 安装与版本管理</h3>
-    <div class="field">
-      <label for="cli-registry">npm 下载源</label>
-      <select id="cli-registry" onchange="renderCliRegistryWarning()">
-        <option value="official">npm 官方源</option>
-        <option value="china">npmmirror 中国镜像（第三方）</option>
-      </select>
-    </div>
-    <div class="notice warn" id="cli-registry-warning" style="display:none;">
-      第三方镜像可能更适合中国网络，但存在同步延迟和供应链风险；安装前请核对包名与版本。
-    </div>
-    <div class="notice" id="cli-management-note">正在读取本机 CLI 状态…</div>
-    <div class="cli-tools" id="cli-tools"></div>
-    <div class="cli-output" id="cli-output"></div>
-    <div class="modal-acts">
-      <button id="btn-check-cli" onclick="checkCliVersions()">查询最新版</button>
-      <button class="ghost" onclick="closeCliManager()">关闭</button>
-    </div>
-  </div>
-</div>
 
 <button id="fs-exit" onclick="toggleFullscreen()">⛶ 退出全屏 (Esc)</button>
 
@@ -496,10 +569,13 @@
 
 <script>
 const API = "";  // 同源
+const VIEWS = ["run", "connections", "tools"];
 let STATE = null;
 let editing = null;   // {provider, id} 编辑态，null 表示新增
 let modalProvider = null;
-let agentFilter = "all";
+let agentFilter = null;
+let showProviderCatalog = false;
+let activeView = "run";
 let activeModalTrigger = null;
 let sseEverOpened = false;
 const PENDING_ACTIONS = new Set();
@@ -578,13 +654,43 @@ function hideModal(id) {
   activeModalTrigger = null;
 }
 
+function switchView(view) {
+  if (!VIEWS.includes(view)) return;
+  activeView = view;
+  document.querySelectorAll(".view-tabs [role='tab']").forEach((button) => {
+    button.setAttribute("aria-selected", String(button.dataset.view === view));
+  });
+  VIEWS.forEach((name) => {
+    document.getElementById(`view-${name}`).hidden = name !== view;
+  });
+  if (view === "run") requestAnimationFrame(fitTerm);
+  if (view === "tools") refreshCliManager();
+}
+
+function openConnectionsForSelected() {
+  setAgentFilter(STATE?.selected_launch?.client || "claude");
+  switchView("connections");
+}
+
 function setAgentFilter(client) {
+  if (!["claude", "codex"].includes(client)) return;
   agentFilter = client;
+  showProviderCatalog = false;
   document.querySelectorAll(".provider-filter button").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.client === client));
   });
-  savePreferences();
-  render();
+  renderProviders();
+}
+
+function toggleProviderCatalog() {
+  showProviderCatalog = !showProviderCatalog;
+  renderProviders();
+}
+
+function isPrimaryProvider(provider, currentProviderId) {
+  return provider.id === currentProviderId
+    || provider.id === "claude"
+    || provider.accounts.length > 0;
 }
 
 function renderConfigWarning() {
@@ -607,76 +713,116 @@ function handleProviderKey(event, rowEl) {
 // ---------- 渲染 ----------
 function render() {
   if (!STATE) return;
-  const cur = STATE.current_provider;
-  const env = [];
-  env.push(STATE.claude_available ? "claude ✓" : "claude ✗(未安装)");
-  env.push(STATE.codex_available ? "codex ✓" : "codex ✗(未安装)");
-  env.push(STATE.ccm_available ? "ccm ✓" : "ccm ✗(直写配置)");
-  document.getElementById("env-line").textContent = env.join("  ·  ");
+  const selected = STATE.selected_launch || {};
+  if (!agentFilter) agentFilter = selected.client || "claude";
 
-  const curLabel = STATE.providers[cur]?.label || cur;
-  document.getElementById("current-label").textContent = "下次：" + curLabel;
+  const envClaude = document.getElementById("env-claude");
+  envClaude.textContent = STATE.claude_available ? "已安装" : "未安装";
+  envClaude.style.color = STATE.claude_available ? "var(--green)" : "var(--yellow)";
+  const envCodex = document.getElementById("env-codex");
+  envCodex.textContent = STATE.codex_available ? "已安装" : "未安装";
+  envCodex.style.color = STATE.codex_available ? "var(--green)" : "var(--yellow)";
+  const envCcm = document.getElementById("env-ccm");
+  envCcm.textContent = STATE.ccm_available ? "已安装" : "未安装（直接写配置）";
+  envCcm.style.color = STATE.ccm_available ? "var(--green)" : "var(--text-dim)";
+
+  document.getElementById("current-label").textContent =
+    `下次启动：${clientLabel(selected.client)} · ${selected.provider_label || "—"}`;
   renderConfigWarning();
+  renderProviders();
+  renderStatus(STATE.agent_status || STATE.claude_status);
+}
 
-  const box = document.getElementById("providers");
-  box.innerHTML = "";
-  Object.values(STATE.providers).forEach((p) => {
-    const isCur = p.id === cur;
-    const el = document.createElement("div");
-    el.className = "provider" + (isCur ? " active expanded" : "");
-    el.hidden = agentFilter !== "all" && p.client !== agentFilter;
-    const accCount = p.accounts.length;
-    const readiness = p.readiness || { ready: false, missing: ["配置"] };
-    const canUseClaudeLogin = p.id === "claude" && readiness.auth_mode === "claude_login";
-
-    let accHtml = "";
-    p.accounts.forEach((a) => {
-      const isAct = a.id === p.active_account;
-      accHtml += `
-        <div class="account ${isAct ? "active" : ""}">
-          <span class="dot"></span>
-          <span>${escapeHtml(a.name)}</span>
-          <span class="key">${a.has_key ? a.key_masked : "（无 Key）"}</span>
-          <span class="acts">
-            ${isAct ? '<span class="badge on">使用中</span>'
-                    : `<button class="sm ghost" onclick="event.stopPropagation();activate('${p.id}','${a.id}',this)">设为当前</button>`}
-            <button class="sm ghost" onclick="openEdit('${p.id}','${a.id}')">编辑</button>
-            <button class="sm danger" onclick="delAccount('${p.id}','${a.id}')">删</button>
-          </span>
-        </div>`;
-    });
-    if (accCount === 0) {
-      accHtml = `<div class="account" style="color:var(--text-dim);justify-content:center;">暂无账号，点击下方添加</div>`;
-    }
-
-    const urlText = p.base_url
-      ? escapeHtml(p.base_url) + (p.model ? "  ·  " + escapeHtml(p.model) : "")
-      : '<span style="color:var(--yellow)">未设置端点，点 ⚙ 配置</span>';
-    el.innerHTML = `
-      <div class="row" onclick="toggleProvider(this)">
-        <button class="provider-expander" aria-expanded="${isCur ? "true" : "false"}"
-                onclick="event.stopPropagation();toggleProvider(this)">
-          <span class="name">${escapeHtml(p.label)}</span>
-        </button>
-        <span class="badge">${clientLabel(p.client)}</span>
-        <span class="badge ${readiness.ready ? "on" : "warn"}">${readiness.ready ? "可启动" : "缺 " + escapeHtml(readiness.missing.join(" / "))}</span>
-        <span class="badge ${accCount || canUseClaudeLogin ? "" : "warn"}">${canUseClaudeLogin ? "Claude 登录" : accCount + " 账号"}</span>
-        <button class="sm ghost icon-btn" style="margin-left:auto" title="编辑端点 URL / 模型"
-                aria-label="编辑 ${escapeHtml(p.label)} 连接"
-                onclick="event.stopPropagation();openProviderEdit('${p.id}')">⚙</button>
-        ${isCur ? '<span class="badge current">当前</span>'
-                : `<button class="sm" onclick="event.stopPropagation();switchProvider('${p.id}',this)">设为下次</button>`}
-      </div>
-      <div class="url">${urlText}</div>
-      <div class="accounts">
-        ${accHtml}
-        <button class="sm ghost" style="align-self:flex-start;margin-top:4px;"
-                onclick="openAdd('${p.id}')">+ 添加账号</button>
-      </div>`;
-    box.appendChild(el);
+function renderProviders() {
+  if (!STATE || !agentFilter) return;
+  document.querySelectorAll(".provider-filter button").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.client === agentFilter));
   });
 
-  renderStatus(STATE.agent_status || STATE.claude_status);
+  const currentProviderId = STATE.current_provider;
+  const providers = Object.values(STATE.providers)
+    .filter((provider) => provider.client === agentFilter);
+  const primary = providers.filter((provider) => isPrimaryProvider(provider, currentProviderId));
+  const catalog = providers.filter((provider) => !isPrimaryProvider(provider, currentProviderId));
+
+  const primaryBox = document.getElementById("providers");
+  primaryBox.innerHTML = "";
+  primary.forEach((provider) => primaryBox.appendChild(
+    buildProviderCard(provider, currentProviderId),
+  ));
+  const empty = document.getElementById("providers-empty");
+  empty.textContent = `还没有已配置的 ${clientLabel(agentFilter)} 连接。`;
+  empty.hidden = primary.length > 0;
+
+  const toggle = document.getElementById("provider-catalog-toggle");
+  toggle.hidden = catalog.length === 0;
+  toggle.textContent = showProviderCatalog ? "收起可添加连接" : "+ 添加或配置连接";
+
+  const catalogSection = document.getElementById("provider-catalog");
+  const catalogBox = document.getElementById("provider-catalog-list");
+  catalogBox.innerHTML = "";
+  if (showProviderCatalog) {
+    catalog.forEach((provider) => catalogBox.appendChild(
+      buildProviderCard(provider, currentProviderId),
+    ));
+  }
+  catalogSection.hidden = !showProviderCatalog || catalog.length === 0;
+}
+
+function buildProviderCard(provider, currentProviderId) {
+  const p = provider;
+  const isCur = p.id === currentProviderId;
+  const el = document.createElement("div");
+  el.className = "provider" + (isCur ? " active expanded" : "");
+  const accCount = p.accounts.length;
+  const readiness = p.readiness || { ready: false, missing: ["配置"] };
+  const canUseClaudeLogin = p.id === "claude" && readiness.auth_mode === "claude_login";
+
+  let accHtml = "";
+  p.accounts.forEach((account) => {
+    const isSelected = account.id === p.active_account;
+    accHtml += `
+      <div class="account ${isSelected ? "active" : ""}">
+        <span class="dot"></span>
+        <span>${escapeHtml(account.name)}</span>
+        <span class="key">${account.has_key ? account.key_masked : "（无 Key）"}</span>
+        <span class="acts">
+          ${isSelected ? '<span class="badge on">已选</span>'
+                       : `<button class="sm ghost" onclick="activate('${p.id}','${account.id}',this)">下次使用</button>`}
+          <button class="sm ghost" onclick="openEdit('${p.id}','${account.id}')">编辑</button>
+          <button class="sm danger" onclick="delAccount('${p.id}','${account.id}')">删</button>
+        </span>
+      </div>`;
+  });
+  if (accCount === 0) {
+    accHtml = '<div class="account" style="color:var(--text-dim);justify-content:center;">暂无账号，点击下方添加</div>';
+  }
+
+  const urlText = p.base_url
+    ? escapeHtml(p.base_url) + (p.model ? "  ·  " + escapeHtml(p.model) : "")
+    : '<span style="color:var(--yellow)">未设置端点，点 ⚙ 配置</span>';
+  el.innerHTML = `
+    <div class="row" onclick="toggleProvider(this)">
+      <button class="provider-expander" aria-expanded="${isCur ? "true" : "false"}"
+              onclick="event.stopPropagation();toggleProvider(this)">
+        <span class="name">${escapeHtml(p.label)}</span>
+      </button>
+      <span class="badge">${clientLabel(p.client)}</span>
+      <span class="badge ${readiness.ready ? "on" : "warn"}">${readiness.ready ? "可启动" : "缺 " + escapeHtml(readiness.missing.join(" / "))}</span>
+      <span class="badge ${accCount || canUseClaudeLogin ? "" : "warn"}">${canUseClaudeLogin ? "Claude 登录" : accCount + " 账号"}</span>
+      <button class="sm ghost icon-btn" style="margin-left:auto" title="编辑端点 URL / 模型"
+              aria-label="编辑 ${escapeHtml(p.label)} 连接"
+              onclick="event.stopPropagation();openProviderEdit('${p.id}')">⚙</button>
+      ${isCur ? '<span class="badge current">下次启动</span>'
+              : `<button class="sm" onclick="event.stopPropagation();switchProvider('${p.id}',this)">下次使用</button>`}
+    </div>
+    <div class="url">${urlText}</div>
+    <div class="accounts">
+      ${accHtml}
+      <button class="sm ghost" style="align-self:flex-start;margin-top:4px;"
+              onclick="openAdd('${p.id}')">+ 添加账号</button>
+    </div>`;
+  return el;
 }
 
 function renderStatus(s) {
@@ -687,19 +833,22 @@ function renderStatus(s) {
   const selectedReady = !!selected.ready;
   const pending = PENDING_ACTIONS.size > 0;
 
-  const runBadge = document.getElementById("run-state-badge");
-  runBadge.textContent = running ? "运行中" : "未运行";
-  runBadge.className = "badge " + (running ? "on" : "");
-  document.getElementById("run-agent").textContent = running
-    ? clientLabel(launch.client || s.client)
-    : "没有运行中的 Agent";
-  document.getElementById("run-connection").textContent = running
-    ? (launch.provider_label || s.provider || "—") : "—";
-  document.getElementById("run-model").textContent = running
-    ? (launch.model || "CLI 默认") : "—";
+  const runningSummary = document.getElementById("running-summary");
+  runningSummary.hidden = !running;
+  document.getElementById("run-state-badge").textContent = "运行中";
+  document.getElementById("run-agent").textContent =
+    running ? clientLabel(launch.client || s.client) : "—";
+  document.getElementById("run-connection").textContent =
+    running ? (launch.provider_label || s.provider || "—") : "—";
+  document.getElementById("run-model").textContent =
+    running ? (launch.model || "CLI 默认") : "—";
   document.getElementById("run-account").textContent = running
-    ? (launch.account_name || (launch.provider_id === "claude" ? "Claude 登录" : "—")) : "—";
+    ? (launch.account_name || (launch.provider_id === "claude" ? "Claude 登录" : "—"))
+    : "—";
   document.getElementById("run-cwd").textContent = running ? (launch.cwd || "—") : "—";
+  document.getElementById("run-meta").textContent = running
+    ? `PID ${s.pid || "—"} · 已运行 ${fmtUptime(s.uptime || 0)}`
+    : "";
 
   const nextReady = document.getElementById("next-ready");
   nextReady.textContent = selectedReady ? "可启动" : "尚未就绪";
@@ -710,7 +859,9 @@ function renderStatus(s) {
   document.getElementById("next-account").textContent = selected.account_name
     || (selected.auth_mode === "claude_login" ? "Claude 登录" : "未配置");
   const missing = document.getElementById("next-missing");
-  missing.textContent = selectedReady ? `会话：${modeLabel(sessionMode)}` : `缺少：${(selected.missing || []).join("、")}`;
+  missing.textContent = selectedReady
+    ? `会话：${modeLabel(sessionMode)}`
+    : `缺少：${(selected.missing || []).join("、")}`;
   missing.style.color = selectedReady ? "var(--text-dim)" : "var(--yellow)";
 
   const mismatch = running && (
@@ -725,20 +876,22 @@ function renderStatus(s) {
   }
   document.getElementById("btn-apply-switch").disabled = !selectedReady || pending;
 
-  const run = document.getElementById("st-run");
-  run.textContent = running ? "运行中" : "未运行";
-  run.className = "val " + (running ? "run" : "stop");
-  document.getElementById("st-pid").textContent = s.pid || "—";
-  document.getElementById("st-provider").textContent = running ? (launch.provider_label || s.provider || "—") : "—";
-  document.getElementById("st-uptime").textContent = running ? fmtUptime(s.uptime) : "—";
   const startButton = document.getElementById("btn-start");
   const restartButton = document.getElementById("btn-restart");
-  startButton.disabled = running || !selectedReady || pending;
-  restartButton.disabled = !running || !selectedReady || pending;
-  document.getElementById("btn-stop").disabled = !running || pending;
-  if (!PENDING_ACTIONS.has("start")) startButton.textContent = `▶ 启动 ${clientLabel(selected.client)}`;
+  const stopButton = document.getElementById("btn-stop");
+  startButton.hidden = running;
+  restartButton.hidden = !running;
+  stopButton.hidden = !running;
+  startButton.disabled = !selectedReady || pending;
+  restartButton.disabled = !selectedReady || pending;
+  stopButton.disabled = pending;
+  if (!PENDING_ACTIONS.has("start")) {
+    startButton.textContent = `▶ 启动 ${clientLabel(selected.client)}`;
+  }
   if (!PENDING_ACTIONS.has("restart")) {
-    restartButton.textContent = mismatch ? "⟳ 切换并重启" : `⟳ 重启 ${clientLabel(selected.client)}`;
+    restartButton.textContent = mismatch
+      ? "⟳ 切换并重启"
+      : `⟳ 重启 ${clientLabel(selected.client)}`;
   }
   const termHint = document.getElementById("term-hint");
   if (!termHint.classList.contains("warn")) {
@@ -747,7 +900,6 @@ function renderStatus(s) {
       : `下次将启动 ${clientLabel(selected.client)}；启动后可在这里直接交互。`;
   }
 
-  // 看门狗 / 保活状态
   const ka = document.getElementById("ka");
   if (ka && document.activeElement !== ka) ka.checked = !!s.keepalive;
   const info = document.getElementById("ka-info");
@@ -820,7 +972,7 @@ async function activate(pid, aid, button = null) {
   setBusy(button, true, "设置中…");
   try {
     await api("/api/account/activate", { method: "POST", body: JSON.stringify({ provider: pid, account_id: aid }) });
-    toast("已设为当前账号", "ok");
+    toast("已更新下次启动账号", "ok");
     await refresh();
   } catch (e) {
     toast(e.message, "err", true);
@@ -975,11 +1127,6 @@ async function saveProvider() {
 // ---------- Agent CLI 安装 / 版本管理 ----------
 let CLI_STATE = null;
 
-async function openCliManager() {
-  showModal("cli-modal");
-  await refreshCliManager();
-}
-function closeCliManager() { hideModal("cli-modal"); }
 
 function renderCliRegistryWarning() {
   const china = document.getElementById("cli-registry").value === "china";
@@ -1169,7 +1316,7 @@ function toggleFullscreen() {
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (isFs) { toggleFullscreen(); return; }
-  const openModal = ["cli-modal", "picker-modal", "provider-modal", "modal"]
+  const openModal = ["picker-modal", "provider-modal", "modal"]
     .map((id) => document.getElementById(id))
     .find((element) => element.classList.contains("show"));
   if (openModal) hideModal(openModal.id);
@@ -1188,14 +1335,13 @@ function fitTerm() {
 
 // ---------- SSE 实时输出 → xterm ----------
 function connectSSE() {
-  const dot = document.getElementById("sse-dot");
-  const label = document.getElementById("sse-label");
+  const connectionAlert = document.getElementById("sse-alert");
   const hint = document.getElementById("term-hint");
   const es = new EventSource(API + "/api/agent/stream");
   es.onopen = () => {
     const reconnected = sseEverOpened;
-    dot.classList.add("on");
-    label.textContent = reconnected ? "终端已重连" : "终端已连接";
+    connectionAlert.textContent = "";
+    connectionAlert.hidden = true;
     if (reconnected) {
       hint.textContent = "终端已重新连接；断线期间的 TUI 画面可能无法补回，可尝试调整窗口或重启 Agent 以重绘。";
       hint.classList.add("warn");
@@ -1213,8 +1359,8 @@ function connectSSE() {
     } catch (e) {}
   };
   es.onerror = () => {
-    dot.classList.remove("on");
-    label.textContent = "终端断线，正在重连…";
+    connectionAlert.textContent = "终端实时连接中断，正在重连…";
+    connectionAlert.hidden = false;
     hint.textContent = "终端实时连接暂时中断，Agent 进程不会因此停止；页面正在自动重连。";
     hint.classList.add("warn");
   };  // EventSource 自动重连
@@ -1278,7 +1424,6 @@ function savePreferences() {
     localStorage.setItem("cc-switch-ui.preferences", JSON.stringify({
       cwd: document.getElementById("cwd").value.trim(),
       sessionMode,
-      agentFilter,
     }));
   } catch (e) {}
 }
@@ -1293,12 +1438,6 @@ function loadPreferences() {
         button.classList.toggle("on", button.dataset.mode === sessionMode);
       });
     }
-    if (["all", "claude", "codex"].includes(preferences.agentFilter)) {
-      agentFilter = preferences.agentFilter;
-      document.querySelectorAll(".provider-filter button").forEach((button) => {
-        button.setAttribute("aria-pressed", String(button.dataset.client === agentFilter));
-      });
-    }
   } catch (e) {}
 }
 
@@ -1307,7 +1446,6 @@ function setupModals() {
     modal: closeModal,
     "provider-modal": closeProviderEdit,
     "picker-modal": closePicker,
-    "cli-modal": closeCliManager,
   };
   document.querySelectorAll(".modal-bg").forEach((background) => {
     background.addEventListener("click", (event) => {
@@ -1329,6 +1467,7 @@ function setupModals() {
 // ---------- 启动 ----------
 loadPreferences();
 setupModals();
+switchView("run");
 initTerm();
 refresh();
 connectSSE();

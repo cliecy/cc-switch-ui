@@ -90,7 +90,7 @@ uv run cc-switch-ui --host 127.0.0.1 --port 8765
 cc-switch-ui --host 127.0.0.1 --port 8765 --allow-cli-management
 ```
 
-然后点击右上角 **CLI 安装/版本**：
+然后进入面板的 **工具** 页：
 
 - 显示 `claude` / `codex` 的路径、当前版本和安装方式。
 - 从 npm 查询最新版本。
@@ -123,10 +123,11 @@ npm install --global @openai/codex@latest
 
 适用于 Ubuntu 服务器上的自建代理、中转或其它 OpenAI Responses 兼容服务：
 
-1. 打开 **Codex · 自定义 OpenAI**，点 ⚙。
-2. 填写 Base URL（通常类似 `https://proxy.example.com/v1`）和模型 ID。
-3. 添加一个账号并填写 API Key，然后切换到该供应商。
-4. 选择工作目录并启动。面板会用一次性的 `codex -c ...` 参数注入自定义 provider，不会改写 `~/.codex/config.toml`。
+1. 进入 **连接与账号**，选择 **Codex CLI**，展开 **添加或配置连接**。
+2. 打开 **Codex · 自定义 OpenAI**，点 ⚙。
+3. 填写 Base URL（通常类似 `https://proxy.example.com/v1`）和模型 ID。
+4. 添加一个账号并填写 API Key，然后将该连接设为下次使用。
+5. 回到 **运行**，选择工作目录并启动。面板会用一次性的 `codex -c ...` 参数注入自定义 provider，不会改写 `~/.codex/config.toml`。
 
 Codex 当前的自定义 provider 使用 **Responses API**。端点必须兼容 `/responses`；只有 Chat Completions `/chat/completions` 的代理不能直接使用。
 
