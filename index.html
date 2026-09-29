@@ -4,9 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>CC Switch · 管理面板</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
-<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<link rel="stylesheet" href="/static/xterm.min.css" />
+<script src="/static/xterm.min.js"></script>
+<script src="/static/addon-fit.min.js"></script>
 <style>
   :root {
     --bg: #0d1117;
@@ -319,7 +319,48 @@
     .switch-notice { align-items: flex-start; flex-direction: column; }
     .switch-notice button { margin-left: 0; }
     .term { height: min(440px, 58vh); min-height: 0; }
+    .onboarding-steps { flex-direction: column; }
   }
+  /* 使用中指示 */
+  .in-use-line {
+    font-size: 13px; margin-bottom: 12px; padding: 9px 12px;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+    overflow-wrap: anywhere;
+  }
+  /* 首次引导 */
+  .onboarding {
+    margin: 14px 0; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--accent); background: var(--accent-soft);
+  }
+  .onboarding-title { font-size: 13px; font-weight: 650; margin-bottom: 8px; }
+  .onboarding-steps { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .onboarding-steps a { color: var(--text); font-size: 13px; text-decoration: none; }
+  .onboarding-steps a:hover { color: var(--accent); }
+  .onboarding-steps li.done { color: var(--green); }
+  .onboarding-steps li.done a { color: var(--green); text-decoration: line-through; }
+  /* 成本提示 */
+  .cost-hint { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+  .cost-hint .note { font-size: 11px; opacity: .7; }
+  /* Toast 警告色 */
+  #toast.warn { border-color: var(--yellow); }
+  /* 回收站 */
+  .trash-toggle { align-self: flex-start; margin-top: 4px; }
+  .trash-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+  .trash-list .account { opacity: .8; }
+  .trash-list .account .dot { background: var(--red); }
+  /* 会话列表 */
+  .session-section { margin-bottom: 14px; }
+  .session-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .session-head > span { font-size: 13px; font-weight: 650; }
+  .session-head button { margin-left: auto; }
+  .session-list { display: flex; flex-direction: column; gap: 6px; max-height: 190px; overflow-y: auto; }
+  .session-row { padding: 9px 12px; }
+  .session-row .dot { width: 8px; height: 8px; border-radius: 50%; background: #444; flex: none; }
+  .session-row .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .session-row .session-uptime { color: var(--text-dim); font-size: 12px; margin-left: auto; }
+  .session-row .idle-badge { display: flex; min-width: 0; }
+  .session-row .acts { min-width: 0; display: flex; gap: 6px; }
+  .session-empty { font-size: 12px; color: var(--text-dim); padding: 2px; }
 </style>
 </head>
 <body>
@@ -336,6 +377,14 @@
     </div>
   </header>
   <div class="config-warning" id="config-warning" role="alert"></div>
+  <div class="onboarding" id="onboarding" hidden>
+    <div class="onboarding-title">首次使用 · 三步开始</div>
+    <ol class="onboarding-steps">
+      <li id="onboard-step-1"><a href="#" onclick="event.preventDefault();switchView('connections')">① 连接与账号：选一个连接</a></li>
+      <li id="onboard-step-2"><a href="#" onclick="event.preventDefault();switchView('connections')">② 添加 API Key</a></li>
+      <li id="onboard-step-3"><a href="#" onclick="event.preventDefault();switchView('run')">③ 运行：启动 Agent</a></li>
+    </ol>
+  </div>
 
   <nav class="view-tabs" role="tablist" aria-label="主要功能">
     <button id="tab-run" role="tab" data-view="run" aria-controls="view-run"
@@ -351,6 +400,14 @@
       <div class="run-grid">
         <div class="card">
           <h2>Agent 控制 <span class="dim">启动配置与运行状态</span></h2>
+          <div class="in-use-line" id="in-use-line" role="status"></div>
+          <div class="session-section">
+            <div class="session-head">
+              <span>会话</span>
+              <button class="sm ghost" id="session-new-btn" onclick="openSessionModal()">+ 新会话</button>
+            </div>
+            <div class="session-list" id="session-list"></div>
+          </div>
           <div class="agent-stack">
             <section class="agent-summary running" id="running-summary"
                      aria-labelledby="running-title" hidden>
@@ -380,7 +437,7 @@
           </div>
           <div class="switch-notice" id="switch-notice" role="status">
             <span id="switch-notice-text"></span>
-            <button class="sm" id="btn-apply-switch" onclick="claudeAction('restart')">切换并重启</button>
+            <button class="sm" id="btn-apply-switch" onclick="applySwitchRestart(this)">切换并重启</button>
           </div>
           <div class="launch-cfg">
             <div class="cfg-row">
@@ -399,6 +456,7 @@
               </div>
             </div>
           </div>
+          <div class="cost-hint" id="cost-hint"></div>
           <div class="ctrl-row">
             <button class="primary" id="btn-start" onclick="claudeAction('start')">▶ 启动</button>
             <button id="btn-restart" onclick="claudeAction('restart')" hidden>⟳ 重启</button>
@@ -437,6 +495,13 @@
             <button class="sm" data-client="codex" aria-pressed="false"
                     onclick="setAgentFilter('codex')">Codex CLI</button>
           </div>
+          <span style="margin-left:auto;">导出 / 导入：</span>
+          <button class="sm" onclick="exportConfig(false)">导出配置</button>
+          <button class="sm" onclick="exportConfig(true)">导出配置（含 Key）</button>
+          <button class="sm" onclick="exportCsv()">导出 CSV</button>
+          <button class="sm" onclick="openImport()">导入配置</button>
+          <input type="file" id="import-file" accept=".json,application/json" hidden
+                 onchange="onImportFile(this)" />
         </div>
         <div class="provider-section">
           <div class="provider-section-title">我的连接</div>
@@ -510,6 +575,12 @@
         <button class="sm" type="button" onclick="toggleKeyVisibility()" aria-controls="m-key">显示</button>
       </div>
     </div>
+    <div class="field" style="margin-bottom:2px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+        <input id="m-shared" type="checkbox" style="width:auto;" />
+        共享 key（多人使用）
+      </label>
+    </div>
     <div class="modal-acts">
       <button class="ghost" onclick="closeModal()">取消</button>
       <button class="primary" id="btn-save-account" onclick="saveAccount()">保存</button>
@@ -535,11 +606,7 @@
     </div>
     <div class="field">
       <label for="pm-auth">鉴权环境变量</label>
-      <select id="pm-auth">
-        <option value="ANTHROPIC_AUTH_TOKEN">ANTHROPIC_AUTH_TOKEN（多数第三方）</option>
-        <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY（Claude 官方）</option>
-        <option value="CC_SWITCH_CODEX_API_KEY">CC_SWITCH_CODEX_API_KEY（Codex 自动管理）</option>
-      </select>
+      <select id="pm-auth"></select>
       <div id="pm-auth-hint" style="color:var(--text-dim);font-size:11px;margin-top:6px;"></div>
     </div>
     <div class="modal-acts">
@@ -562,6 +629,66 @@
   </div>
 </div>
 
+<!-- 配置导入弹窗 -->
+<div class="modal-bg" id="import-modal" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="import-title" tabindex="-1">
+    <h3 id="import-title">导入配置</h3>
+    <div class="field">
+      <label>导入文件：<span id="import-filename" style="font-family:var(--mono);font-size:12px;"></span></label>
+    </div>
+    <div class="field">
+      <label>导入方式</label>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+          <input type="radio" name="import-mode" value="merge" checked style="width:auto;margin-top:4px;" />
+          <span>合并：新增缺失的连接，同 ID 账号以导入为准</span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+          <input type="radio" name="import-mode" value="replace" style="width:auto;margin-top:4px;" />
+          <span>覆盖：先备份当前配置，再整体替换</span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-acts">
+      <button class="ghost" onclick="closeImport()">取消</button>
+      <button class="primary" id="btn-apply-import" onclick="applyImport()">导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新会话弹窗 -->
+<div class="modal-bg" id="session-modal" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sm-title" tabindex="-1">
+    <h3 id="sm-title">新会话</h3>
+    <div class="field">
+      <label for="sm-name">会话名称</label>
+      <input id="sm-name" placeholder="例如：项目 A / 备用" />
+    </div>
+    <div class="field">
+      <label for="sm-cwd">工作目录</label>
+      <div class="cwd-box">
+        <input id="sm-cwd" placeholder="留空 = 当前工作目录" />
+        <button class="sm" type="button" onclick="openSessionPicker()">浏览…</button>
+      </div>
+    </div>
+    <div class="field">
+      <label for="sm-provider">连接</label>
+      <select id="sm-provider"></select>
+    </div>
+    <div class="field">
+      <label>会话模式</label>
+      <div class="seg" id="sm-mode-seg">
+        <button type="button" class="sm on" data-mode="new" onclick="setSmMode(this)">新会话</button>
+        <button type="button" class="sm" data-mode="continue" onclick="setSmMode(this)">继续上次</button>
+        <button type="button" class="sm" data-mode="resume" onclick="setSmMode(this)">恢复历史…</button>
+      </div>
+    </div>
+    <div class="modal-acts">
+      <button class="ghost" onclick="closeSessionModal()">取消</button>
+      <button class="primary" id="btn-create-session" onclick="createSession()">创建</button>
+    </div>
+  </div>
+</div>
 
 <button id="fs-exit" onclick="toggleFullscreen()">⛶ 退出全屏 (Esc)</button>
 
@@ -569,6 +696,7 @@
 
 <script>
 const API = "";  // 同源
+const URL_TOKEN = new URLSearchParams(location.search).get("token");
 const VIEWS = ["run", "connections", "tools"];
 let STATE = null;
 let editing = null;   // {provider, id} 编辑态，null 表示新增
@@ -578,18 +706,21 @@ let showProviderCatalog = false;
 let activeView = "run";
 let activeModalTrigger = null;
 let sseEverOpened = false;
+let SESSIONS = [], activeSid = null, sse = null, sseSid = null;
 const PENDING_ACTIONS = new Set();
 
 // ---------- 工具 ----------
 async function api(path, opts) {
-  const res = await fetch(API + path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
+  const headers = { "Content-Type": "application/json" };
+  if (URL_TOKEN) headers["Authorization"] = "Bearer " + URL_TOKEN;
+  const res = await fetch(API + path, { headers, ...opts });
   let data = {};
   try { data = await res.json(); } catch (e) {}
   if (!res.ok || data.ok === false) {
-    throw new Error(data.error || data.message || ("请求失败 " + res.status));
+    const err = new Error(data.error || data.message || ("请求失败 " + res.status));
+    err.code = data.code;
+    err.data = data;
+    throw err;
   }
   return data;
 }
@@ -618,6 +749,10 @@ function clientLabel(client) {
 
 function modeLabel(mode) {
   return ({ new: "新会话", continue: "继续上次", resume: "恢复历史" })[mode] || "新会话";
+}
+
+function agentBase(sid) {
+  return sid ? `/api/sessions/${encodeURIComponent(sid)}` : "/api/agent";
 }
 
 function setBusy(target, busy, busyText = "处理中…") {
@@ -731,6 +866,39 @@ function render() {
   renderConfigWarning();
   renderProviders();
   renderStatus(STATE.agent_status || STATE.claude_status);
+  renderCostHint(selected);
+  renderOnboarding();
+}
+
+const COST_HINT = {
+  deepseek: "低", kimi: "低", glm: "低", qwen: "低",
+  openrouter: "视模型", claude: "高", custom: "自定义", codex_custom: "自定义",
+};
+
+function renderCostHint(selected) {
+  const el = document.getElementById("cost-hint");
+  el.innerHTML = `将使用：${escapeHtml(selected.provider_label || "—")} · `
+    + `${escapeHtml(selected.model || "CLI 默认")} · `
+    + `${escapeHtml(selected.account_name || "Claude 登录")} · 价位 ${COST_HINT[selected.provider_id] || "—"} `
+    + '<span class="note">真实用量暂不支持</span>';
+}
+
+function renderOnboarding() {
+  const box = document.getElementById("onboarding");
+  let everRan = false;
+  try { everRan = !!localStorage.getItem("cc-switch-ui.ever-ran"); } catch (e) {}
+  const anyAccount = Object.values(STATE.providers || {})
+    .some((provider) => (provider.accounts || []).length > 0);
+  const ready = !!(STATE.selected_launch || {}).ready;
+  const steps = [
+    { id: "onboard-step-1", done: anyAccount },
+    { id: "onboard-step-2", done: ready },
+    { id: "onboard-step-3", done: everRan },
+  ];
+  box.hidden = everRan || steps.every((step) => step.done);
+  steps.forEach((step) => {
+    document.getElementById(step.id).classList.toggle("done", step.done);
+  });
 }
 
 function renderProviders() {
@@ -784,7 +952,7 @@ function buildProviderCard(provider, currentProviderId) {
     accHtml += `
       <div class="account ${isSelected ? "active" : ""}">
         <span class="dot"></span>
-        <span>${escapeHtml(account.name)}</span>
+        <span>${escapeHtml(account.name)}${account.shared ? " 🤝" : ""}</span>
         <span class="key">${account.has_key ? account.key_masked : "（无 Key）"}</span>
         <span class="acts">
           ${isSelected ? '<span class="badge on">已选</span>'
@@ -810,7 +978,10 @@ function buildProviderCard(provider, currentProviderId) {
       <span class="badge">${clientLabel(p.client)}</span>
       <span class="badge ${readiness.ready ? "on" : "warn"}">${readiness.ready ? "可启动" : "缺 " + escapeHtml(readiness.missing.join(" / "))}</span>
       <span class="badge ${accCount || canUseClaudeLogin ? "" : "warn"}">${canUseClaudeLogin ? "Claude 登录" : accCount + " 账号"}</span>
-      <button class="sm ghost icon-btn" style="margin-left:auto" title="编辑端点 URL / 模型"
+      <button class="sm ghost" style="margin-left:auto" title="测试连接"
+              aria-label="测试 ${escapeHtml(p.label)} 连接"
+              onclick="event.stopPropagation();testProvider('${p.id}',this)">测试</button>
+      <button class="sm ghost icon-btn" title="编辑端点 URL / 模型"
               aria-label="编辑 ${escapeHtml(p.label)} 连接"
               onclick="event.stopPropagation();openProviderEdit('${p.id}')">⚙</button>
       ${isCur ? '<span class="badge current">下次启动</span>'
@@ -821,6 +992,9 @@ function buildProviderCard(provider, currentProviderId) {
       ${accHtml}
       <button class="sm ghost" style="align-self:flex-start;margin-top:4px;"
               onclick="openAdd('${p.id}')">+ 添加账号</button>
+      <button class="sm ghost trash-toggle" aria-expanded="false"
+              onclick="toggleTrash('${p.id}',this)">已删除（可恢复）</button>
+      <div class="trash-list" hidden></div>
     </div>`;
   return el;
 }
@@ -832,6 +1006,15 @@ function renderStatus(s) {
   const running = !!s.running;
   const selectedReady = !!selected.ready;
   const pending = PENDING_ACTIONS.size > 0;
+
+  const inUseLine = document.getElementById("in-use-line");
+  if (running) {
+    inUseLine.textContent =
+      `正在使用：${launch.provider_label || "—"} · ${launch.account_name || "Claude 登录"}（运行中）｜ 重启后：${selected.provider_label || "—"} · ${selected.account_name || "未配置"}`;
+  } else {
+    inUseLine.textContent =
+      `下次将使用：${selected.provider_label || "—"} · ${selected.account_name || "未配置"}`;
+  }
 
   const runningSummary = document.getElementById("running-summary");
   runningSummary.hidden = !running;
@@ -917,7 +1100,7 @@ async function toggleKeepalive() {
   const checkbox = document.getElementById("ka");
   checkbox.disabled = true;
   try {
-    await api("/api/agent/keepalive", { method: "POST", body: JSON.stringify({ enabled }) });
+    await api(agentBase(activeSid || "") + "/keepalive", { method: "POST", body: JSON.stringify({ enabled }) });
     toast(enabled ? "已开启保活" : "已关闭保活", "ok");
     await refresh();
   } catch (e) {
@@ -945,6 +1128,7 @@ async function refresh() {
     STATE = await api("/api/state");
     render();
   } catch (e) { toast(e.message, "err"); }
+  refreshSessions();
 }
 
 async function switchProvider(pid, button = null) {
@@ -987,9 +1171,106 @@ async function delAccount(pid, aid) {
   if (!confirm(`确认删除「${account?.name || "该账号"}」？\n\n连接：${provider?.label || pid}`)) return;
   try {
     await api(`/api/account/${aid}?provider=${encodeURIComponent(pid)}`, { method: "DELETE" });
-    toast("已删除", "ok");
+    toast("已删除（可稍后恢复）", "ok");
     await refresh();
   } catch (e) { toast(e.message, "err", true); }
+}
+
+async function toggleTrash(pid, button) {
+  const list = button.parentElement.querySelector(".trash-list");
+  if (list.hidden) {
+    list.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    try {
+      const r = await api(`/api/account/trash?provider=${encodeURIComponent(pid)}`);
+      const items = r.items || [];
+      if (!items.length) {
+        list.innerHTML = '<div class="account"><span class="dot"></span><span style="color:var(--text-dim);">回收站为空</span></div>';
+        return;
+      }
+      list.innerHTML = "";
+      items.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "account";
+        row.innerHTML = `
+          <span class="dot"></span>
+          <span>${escapeHtml(item.name || item.id)} · 剩 ${item.days_left} 天</span>
+          <span class="acts">
+            <button class="sm ghost" onclick="restoreAccount('${pid}','${item.id}',this)">恢复</button>
+          </span>`;
+        list.appendChild(row);
+      });
+    } catch (e) {
+      list.innerHTML = `<div class="account"><span class="dot"></span><span style="color:var(--red);">${escapeHtml(e.message)}</span></div>`;
+    }
+  } else {
+    list.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  }
+}
+
+async function restoreAccount(pid, aid, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/account/${encodeURIComponent(aid)}/restore?provider=${encodeURIComponent(pid)}`, { method: "POST" });
+    toast("已恢复", "ok");
+    button.closest(".account").remove();
+    await refresh();
+  } catch (e) {
+    toast(e.message, "err", true);
+    button.disabled = false;
+  }
+}
+
+async function testProvider(pid, button) {
+  setBusy(button, true, "测试中…");
+  const label = STATE?.providers?.[pid]?.label || pid;
+  try {
+    const r = await api(`/api/provider/${pid}/test`, { method: "POST", body: JSON.stringify({}) });
+    if (r.result === "ok") toast(`${label}：连接正常`, "ok");
+    else toast(`${label}：${r.note || "测试通过"}`, "ok");
+  } catch (e) {
+    const result = (e.data && e.data.result) || "";
+    if (result === "auth_failed") toast("Key 无效或无权限", "err");
+    else if (result === "network") toast("网络不可达", "warn");
+    else if (result) toast(`测试未通过（HTTP ${e.data.status || "错误"}）`, "");
+    else toast(e.message, "err", true);
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function applySwitchRestart(button) {
+  if (PENDING_ACTIONS.size) return;
+  const provider = STATE?.current_provider;
+  if (!provider) return;
+  PENDING_ACTIONS.add("restart");
+  setActionError("");
+  setBusy(button, true, "切换中…");
+  if (STATE) renderStatus(STATE.agent_status || STATE.claude_status);
+  try {
+    const body = {
+      provider,
+      cwd: document.getElementById("cwd").value.trim(),
+      session_mode: sessionMode,
+      rows: term ? term.rows : 30,
+      cols: term ? term.cols : 100,
+    };
+    if (term) term.reset();
+    const r = await api(agentBase(activeSid || "") + "/switch-restart", { method: "POST", body: JSON.stringify(body) });
+    if (term) term.focus();
+    toast(r.message || "已切换", "ok");
+    document.getElementById("term-hint").classList.remove("warn");
+    if (r.status) renderStatus(r.status);
+    await refresh();
+  } catch (e) {
+    setActionError(e.message);
+    toast(e.message, "err", true);
+  } finally {
+    PENDING_ACTIONS.delete("restart");
+    setBusy(button, false);
+    if (STATE) renderStatus(STATE.agent_status || STATE.claude_status);
+  }
 }
 
 // 弹窗
@@ -997,6 +1278,7 @@ function openAdd(pid) {
   editing = null; modalProvider = pid;
   document.getElementById("modal-title").textContent = "添加账号";
   document.getElementById("m-name").value = "";
+  document.getElementById("m-shared").checked = false;
   document.getElementById("m-key").value = "";
   document.getElementById("m-key").type = "password";
   document.getElementById("m-key-hint").textContent = "";
@@ -1007,6 +1289,7 @@ function openEdit(pid, aid) {
   editing = { provider: pid, id: aid }; modalProvider = pid;
   document.getElementById("modal-title").textContent = "编辑账号";
   document.getElementById("m-name").value = acc.name;
+  document.getElementById("m-shared").checked = !!acc.shared;
   document.getElementById("m-key").value = "";
   document.getElementById("m-key").type = "password";
   document.getElementById("m-key-hint").textContent = "（留空则保持不变）";
@@ -1025,20 +1308,21 @@ function toggleKeyVisibility() {
 async function saveAccount() {
   const name = document.getElementById("m-name").value.trim();
   const key = document.getElementById("m-key").value.trim();
+  const shared = document.getElementById("m-shared").checked;
   if (!name) { toast("请输入账号名称", "err"); document.getElementById("m-name").focus(); return; }
   setBusy("btn-save-account", true, "保存中…");
   try {
     if (editing) {
       await api(`/api/account/${editing.id}`, {
         method: "PUT",
-        body: JSON.stringify({ provider: modalProvider, name, api_key: key }),
+        body: JSON.stringify({ provider: modalProvider, name, api_key: key, shared }),
       });
       toast("已更新", "ok");
     } else {
       if (!key) { toast("请输入 API Key", "err"); document.getElementById("m-key").focus(); return; }
       await api("/api/account", {
         method: "POST",
-        body: JSON.stringify({ provider: modalProvider, name, api_key: key }),
+        body: JSON.stringify({ provider: modalProvider, name, api_key: key, shared }),
       });
       toast("已添加账号", "ok");
     }
@@ -1069,18 +1353,32 @@ function openProviderEdit(pid) {
   document.getElementById("pm-label").value = p.label;
   document.getElementById("pm-url").value = p.base_url;
   document.getElementById("pm-model").value = p.model;
-  document.getElementById("pm-auth").value = p.auth_var || "ANTHROPIC_AUTH_TOKEN";
   const isCodex = p.client === "codex";
-  const codexAuthOption = document.querySelector('#pm-auth option[value="CC_SWITCH_CODEX_API_KEY"]');
-  codexAuthOption.hidden = !isCodex;
-  document.getElementById("pm-auth").disabled = isCodex;
+  const authSelect = document.getElementById("pm-auth");
+  authSelect.innerHTML = "";
+  const authOptions = isCodex
+    ? [["CC_SWITCH_CODEX_API_KEY", "CC_SWITCH_CODEX_API_KEY（Codex 自动管理）"]]
+    : [
+        ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN（多数第三方）"],
+        ["ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY（Claude 官方）"],
+      ];
+  authOptions.forEach(([value, text]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = text;
+    if (isCodex) option.disabled = true;
+    authSelect.appendChild(option);
+  });
+  authSelect.disabled = isCodex;
+  authSelect.value = authOptions.some(([value]) => value === p.auth_var)
+    ? p.auth_var
+    : (isCodex ? "CC_SWITCH_CODEX_API_KEY" : "ANTHROPIC_AUTH_TOKEN");
   document.getElementById("pm-auth-hint").textContent = isCodex
-    ? "Codex 使用 Responses API；密钥通过临时环境变量注入，不改写 ~/.codex/config.toml。"
+    ? "Codex 自定义连接：密钥在启动时自动注入，不会修改本机的 Codex 配置文件。"
     : "";
   document.getElementById("pm-url-label").textContent = isCodex
-    ? "Base URL（OpenAI Responses 兼容端点）"
-    : "Base URL（Anthropic 兼容端点）";
-  document.getElementById("pm-model-label").textContent = isCodex
+    ? "Base URL（OpenAI 兼容端点）"
+    : "Base URL（Anthropic 兼容端点）";  document.getElementById("pm-model-label").textContent = isCodex
     ? "模型 ID（必填，传给 Codex CLI）"
     : "模型 ID（可选，注入 ANTHROPIC_MODEL）";
   document.getElementById("pm-url").placeholder = isCodex
@@ -1121,6 +1419,88 @@ async function saveProvider() {
     toast(e.message, "err", true);
   } finally {
     setBusy("btn-save-provider", false);
+  }
+}
+
+// ---------- 导出 / 导入 ----------
+async function exportConfig(includeKeys) {
+  try {
+    const r = await api("/api/config/export" + (includeKeys ? "?include_keys=1" : ""));
+    const blob = new Blob([JSON.stringify(r.config, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "cc-switch-config" + (includeKeys ? "-with-keys" : "") + ".json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(includeKeys ? "已导出配置（含 Key）" : "已导出配置", "ok");
+  } catch (e) { toast(e.message, "err", true); }
+}
+
+async function exportCsv() {
+  try {
+    const headers = {};
+    if (URL_TOKEN) headers["Authorization"] = "Bearer " + URL_TOKEN;
+    const res = await fetch("/api/account/export.csv", { headers });
+    if (!res.ok) {
+      let data = {};
+      try { data = await res.json(); } catch (e) {}
+      throw new Error(data.error || "导出失败 " + res.status);
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "cc-switch-accounts.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast("已导出 CSV", "ok");
+  } catch (e) { toast(e.message, "err", true); }
+}
+
+let importPayload = null;
+function openImport() {
+  const input = document.getElementById("import-file");
+  input.value = "";
+  input.click();
+}
+function onImportFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      const cfg = parsed && parsed.config !== undefined ? parsed.config : parsed;
+      if (!cfg || typeof cfg !== "object" || !cfg.providers) throw new Error("缺少 providers 字段");
+      importPayload = cfg;
+      document.getElementById("import-filename").textContent = file.name;
+      showModal("import-modal");
+    } catch (e) {
+      toast("文件不是有效的配置 JSON：" + e.message, "err", true);
+    }
+  };
+  reader.onerror = () => toast("读取文件失败", "err", true);
+  reader.readAsText(file);
+}
+function closeImport() {
+  importPayload = null;
+  hideModal("import-modal");
+}
+async function applyImport() {
+  if (!importPayload) { closeImport(); return; }
+  const mode = document.querySelector('input[name="import-mode"]:checked').value;
+  setBusy("btn-apply-import", true, "导入中…");
+  try {
+    await api("/api/config/import", {
+      method: "POST",
+      body: JSON.stringify({ config: importPayload, mode }),
+    });
+    toast(mode === "replace" ? "已覆盖（旧配置已备份）" : "已合并导入", "ok");
+    closeImport();
+    await refresh();
+  } catch (e) {
+    toast(e.message, "err", true);
+  } finally {
+    setBusy("btn-apply-import", false);
   }
 }
 
@@ -1238,8 +1618,9 @@ function setActionError(message = "") {
   error.classList.toggle("show", !!message);
 }
 
-async function claudeAction(action) {
+async function claudeAction(action, sid) {
   if (PENDING_ACTIONS.size) return;
+  sid = sid || activeSid || "";
   const buttonId = `btn-${action}`;
   PENDING_ACTIONS.add(action);
   setActionError("");
@@ -1254,7 +1635,10 @@ async function claudeAction(action) {
     }
     // 新会话 / 重启前清空终端，避免上一段会话的残留画面与新会话内容叠在一起
     if (action !== "stop" && term) term.reset();
-    const r = await api(`/api/agent/${action}`, { method: "POST", body: JSON.stringify(body) });
+    const r = await api(agentBase(sid) + "/" + action, { method: "POST", body: JSON.stringify(body) });
+    if (action === "start") {
+      try { localStorage.setItem("cc-switch-ui.ever-ran", "1"); } catch (e) {}
+    }
     if (action !== "stop" && term) { term.focus(); fitTerm(); }
     toast(r.message || "ok", "ok");
     document.getElementById("term-hint").classList.remove("warn");
@@ -1270,14 +1654,163 @@ async function claudeAction(action) {
   }
 }
 
+// ---------- 多会话 ----------
+async function refreshSessions() {
+  try {
+    const r = await api("/api/sessions");
+    SESSIONS = r.sessions || [];
+  } catch (e) {
+    SESSIONS = [];
+  }
+  renderSessions();
+}
+
+function renderSessions() {
+  if (activeSid && !SESSIONS.some((session) => session.id === activeSid)) {
+    activeSid = null;
+    if (term) term.reset();
+    connectSSE(null);
+  }
+  const list = document.getElementById("session-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!SESSIONS.length) {
+    const empty = document.createElement("div");
+    empty.className = "session-empty";
+    empty.textContent = "暂无会话；启动默认会话后会自动出现在这里。";
+    list.appendChild(empty);
+    return;
+  }
+  SESSIONS.forEach((session) => list.appendChild(buildSessionRow(session)));
+}
+
+function buildSessionRow(session) {
+  const row = document.createElement("div");
+  row.className = "provider session-row" + (session.id === activeSid ? " active" : "");
+  row.dataset.sid = session.id;
+  row.tabIndex = 0;
+  row.setAttribute("role", "button");
+  const idleBadge = session.running && session.idle_seconds > 30
+    ? `<span class="idle-badge"><span class="badge warn">${Math.floor(session.idle_seconds)} 秒无输出</span></span>`
+    : '<span class="idle-badge"></span>';
+  row.innerHTML = `
+    <div class="row">
+      <span class="dot${session.running ? " on" : ""}"></span>
+      <span class="name">${escapeHtml(session.name || session.id)}</span>
+      <span class="badge">${escapeHtml(clientLabel(session.client))}</span>
+      <span class="badge">${escapeHtml(session.provider_label || session.provider_id || "—")}</span>
+      <span class="session-uptime">${session.running ? "运行 " + fmtUptime(session.uptime || 0) : "已停止"}</span>
+      ${idleBadge}
+      <span class="acts">
+        <button class="sm ghost" title="删除会话" aria-label="删除会话"
+                onclick="deleteSession('${escapeHtml(session.id)}',event)">✕</button>
+      </span>
+    </div>`;
+  row.addEventListener("click", (event) => {
+    if (event.target.closest("button")) return;
+    selectSession(session.id);
+  });
+  row.addEventListener("keydown", (event) => {
+    if (event.target !== row || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    selectSession(session.id);
+  });
+  return row;
+}
+
+function selectSession(sid) {
+  if (sid === activeSid) return;
+  activeSid = sid;
+  document.querySelectorAll(".session-row").forEach((row) =>
+    row.classList.toggle("active", row.dataset.sid === sid));
+  switchTerm(sid);
+}
+
+function switchTerm(sid) {
+  sid = sid || activeSid || "";
+  if (term) term.reset();
+  document.getElementById("term-hint").classList.remove("warn");
+  connectSSE(sid);
+  if (STATE) renderStatus(STATE.agent_status || STATE.claude_status);
+}
+
+async function createSession() {
+  const name = document.getElementById("sm-name").value.trim();
+  const cwd = document.getElementById("sm-cwd").value.trim();
+  const provider = document.getElementById("sm-provider").value;
+  if (!provider) { toast("请选择连接", "err"); return; }
+  setBusy("btn-create-session", true, "创建中…");
+  try {
+    const r = await api("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({
+        name: name || null,
+        cwd: cwd || null,
+        provider_id: provider,
+        session_mode: smSessionMode,
+      }),
+    });
+    toast("会话已创建", "ok");
+    closeSessionModal();
+    await refreshSessions();
+    const created = r.session || {};
+    if (created.id) selectSession(created.id);
+  } catch (e) {
+    toast(e.message, "err", true);
+  } finally {
+    setBusy("btn-create-session", false);
+  }
+}
+
+async function deleteSession(sid, event) {
+  if (event) event.stopPropagation();
+  const session = SESSIONS.find((item) => item.id === sid);
+  if (!confirm(`确认删除会话「${session?.name || sid}」？${session?.running ? "\n\n该会话正在运行，删除后会停止。" : ""}`)) return;
+  try {
+    await api(`/api/sessions/${encodeURIComponent(sid)}`, { method: "DELETE" });
+    toast("会话已删除", "ok");
+    if (activeSid === sid) {
+      activeSid = null;
+      if (term) term.reset();
+      connectSSE(null);
+    }
+    await refreshSessions();
+  } catch (e) { toast(e.message, "err", true); }
+}
+
+let smSessionMode = "new";
+function setSmMode(btn) {
+  document.querySelectorAll("#sm-mode-seg button").forEach((b) => b.classList.remove("on"));
+  btn.classList.add("on");
+  smSessionMode = btn.dataset.mode;
+}
+function openSessionModal() {
+  document.getElementById("sm-name").value = "";
+  document.getElementById("sm-cwd").value = document.getElementById("cwd").value.trim();
+  const select = document.getElementById("sm-provider");
+  select.innerHTML = "";
+  Object.values(STATE?.providers || {}).forEach((provider) => {
+    const option = document.createElement("option");
+    option.value = provider.id;
+    option.textContent = `${provider.label || provider.id}（${clientLabel(provider.client)}）`;
+    select.appendChild(option);
+  });
+  select.value = STATE?.current_provider || (select.options[0] ? select.options[0].value : "");
+  smSessionMode = sessionMode;
+  document.querySelectorAll("#sm-mode-seg button").forEach((b) =>
+    b.classList.toggle("on", b.dataset.mode === smSessionMode));
+  showModal("session-modal");
+}
+function closeSessionModal() { hideModal("session-modal"); }
+
 // ---------- xterm 终端 ----------
 let term, fitAddon;
 function initTerm() {
   if (typeof Terminal === "undefined") {
     document.getElementById("term").innerHTML =
       '<div style="color:var(--red);padding:14px;font-size:13px;">' +
-      'xterm.js 未能加载（可能离线 / CDN 被拦截）。供应商与账号管理仍可正常使用；' +
-      '终端功能需要能访问 cdn.jsdelivr.net。</div>';
+      'xterm.js 未能加载。供应商与账号管理仍可正常使用；' +
+      '终端功能依赖面板自带的静态文件，请确认服务运行正常。</div>';
     return;
   }
   term = new Terminal({
@@ -1293,12 +1826,12 @@ function initTerm() {
   term.open(document.getElementById("term"));
   fitTerm();
 
-  // 用户在终端里的按键 → 原样发到后端 pty
+  // 用户在终端里的按键 → 原样发送到后端
   term.onData((data) => {
-    api("/api/agent/input", { method: "POST", body: JSON.stringify({ raw: data }) }).catch(() => {});
+    api(agentBase(activeSid || "") + "/input", { method: "POST", body: JSON.stringify({ raw: data }) }).catch(() => {});
   });
 
-  // 窗口尺寸变化 → 通知后端 pty，避免 TUI 错位
+  // 窗口尺寸变化 → 通知后端新的终端尺寸，避免画面错位
   let rT;
   window.addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(fitTerm, 150); });
 }
@@ -1314,19 +1847,32 @@ function toggleFullscreen() {
   setTimeout(() => { fitTerm(); term.focus(); }, 60);
 }
 window.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  if (isFs) { toggleFullscreen(); return; }
-  const openModal = ["picker-modal", "provider-modal", "modal"]
+  const openModal = ["picker-modal", "provider-modal", "modal", "import-modal", "session-modal"]
     .map((id) => document.getElementById(id))
     .find((element) => element.classList.contains("show"));
-  if (openModal) hideModal(openModal.id);
+  if (e.key === "Escape") {
+    if (isFs) { toggleFullscreen(); return; }
+    if (openModal) hideModal(openModal.id);
+    return;
+  }
+  if (e.target.closest("input, textarea, select, .xterm, [contenteditable]")) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === "1") { switchView("run"); return; }
+  if (e.key === "2") { switchView("connections"); return; }
+  if (e.key === "3") { switchView("tools"); return; }
+  if (openModal || PENDING_ACTIONS.size || !STATE) return;
+  const status = STATE.agent_status || STATE.claude_status;
+  const running = !!(status && status.running);
+  if (e.key === "s" && !running && STATE.selected_launch && STATE.selected_launch.ready) claudeAction("start");
+  else if (e.key === "r" && running) claudeAction("restart");
+  else if (e.key === "t" && running) claudeAction("stop");
 });
 
 function fitTerm() {
   if (!fitAddon) return;
   try {
     fitAddon.fit();
-    api("/api/agent/resize", {
+      api(agentBase(activeSid || "") + "/resize", {
       method: "POST",
       body: JSON.stringify({ rows: term.rows, cols: term.cols }),
     }).catch(() => {});
@@ -1334,10 +1880,17 @@ function fitTerm() {
 }
 
 // ---------- SSE 实时输出 → xterm ----------
-function connectSSE() {
+function connectSSE(sid) {
+  sid = sid || "";
+  if (sse && sseSid === (sid || null)) return;
+  if (sse) { sse.close(); sse = null; }
+  sseSid = sid || null;
   const connectionAlert = document.getElementById("sse-alert");
   const hint = document.getElementById("term-hint");
-  const es = new EventSource(API + "/api/agent/stream");
+  const streamUrl = API + agentBase(sid) + "/stream"
+    + (URL_TOKEN ? "?token=" + encodeURIComponent(URL_TOKEN) : "");
+  const es = new EventSource(streamUrl);
+  sse = es;
   es.onopen = () => {
     const reconnected = sseEverOpened;
     connectionAlert.textContent = "";
@@ -1345,6 +1898,9 @@ function connectSSE() {
     if (reconnected) {
       hint.textContent = "终端已重新连接；断线期间的 TUI 画面可能无法补回，可尝试调整窗口或重启 Agent 以重绘。";
       hint.classList.add("warn");
+      api(agentBase(sseSid || "") + "/status").then((status) => {
+        if (status && status.log_path) hint.textContent += " 输出日志：" + status.log_path;
+      }).catch(() => {});
     } else {
       hint.classList.remove("warn");
       if (STATE) renderStatus(STATE.agent_status || STATE.claude_status);
@@ -1368,10 +1924,15 @@ function connectSSE() {
 
 // ---------- 目录选择器 ----------
 let pickerPath = null;
+let pickerTarget = "cwd";
 async function openPicker() {
-  const start = document.getElementById("cwd").value.trim() || "~";
+  const start = document.getElementById(pickerTarget).value.trim() || "~";
   if (!await loadPicker(start)) return;
   showModal("picker-modal");
+}
+function openSessionPicker() {
+  pickerTarget = "sm-cwd";
+  openPicker();
 }
 function closePicker() { hideModal("picker-modal"); }
 
@@ -1414,8 +1975,9 @@ function pickerItem(ico, name, onclick) {
   return el;
 }
 function choosePickerPath() {
-  if (pickerPath) document.getElementById("cwd").value = pickerPath;
-  savePreferences();
+  if (pickerPath) document.getElementById(pickerTarget).value = pickerPath;
+  if (pickerTarget === "cwd") savePreferences();
+  pickerTarget = "cwd";
   closePicker();
 }
 
@@ -1446,6 +2008,8 @@ function setupModals() {
     modal: closeModal,
     "provider-modal": closeProviderEdit,
     "picker-modal": closePicker,
+    "import-modal": closeImport,
+    "session-modal": closeSessionModal,
   };
   document.querySelectorAll(".modal-bg").forEach((background) => {
     background.addEventListener("click", (event) => {
@@ -1473,9 +2037,10 @@ refresh();
 connectSSE();
 setInterval(async () => {
   try {
-    const s = await api("/api/agent/status");
+    const s = await api(agentBase(activeSid || "") + "/status");
     renderStatus(s);
   } catch (e) {}
+  refreshSessions();
 }, 3000);
 </script>
 </body>

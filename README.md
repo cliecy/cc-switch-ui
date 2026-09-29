@@ -7,9 +7,16 @@
 
 - 查看 / 切换当前供应商：Claude 官方、DeepSeek、Kimi、GLM、Qwen、OpenRouter、Claude 自定义，以及 **Codex 自定义 OpenAI**
 - **自定义端点**：点供应商卡片上的 ⚙ 可改 Base URL / 模型 ID / 鉴权环境变量，接入 Anthropic 或 OpenAI Responses 兼容端点（中转、自建代理等）
-- 管理 API Key：增 / 删 / 改，本地存储于 `~/.ccm_config`
-- 每个供应商支持多账号，一键切换激活账号
+- 管理 API Key：增 / 删 / 改，本地存储于 `~/.ccm_config`；**删除可撤销**——账号进 7 天回收站，随时可恢复
+- 每个供应商支持多账号，一键切换激活账号；共享 key 可标记（🤝）
 - 启动 / 重启 / 停止 `claude` 或 `codex` 进程（通过 pty 运行）
+- **多会话并行**：同时运行多个 Agent 会话（默认上限 8，`--max-sessions` 可调），每个会话独立绑定供应商 / 账号 / 工作目录，终端与日志互不串流
+- **档案（profile）**：保存「工作目录 + 连接 + 账号 + 会话模式」组合，一键从档案建会话
+- **cc-switch 命令行客户端**：`status` / `use` / `sessions` / `session` / `account` / `export` / `import`，与面板同一后端
+- **配置导出 / 导入**：导出默认脱敏（`include_keys` 可选原值）；导入支持 merge / replace，replace 前先备份当前配置
+- **连接测试**：供应商卡片「测试」按钮，验证 Key 与端点可用性（鉴权失败 / 网络不可达 分类提示）
+- **安全基线**（远程部署可选）：Bearer Token 鉴权（`--auth-token`）、Origin/CSRF 校验、变更审计日志、只读模式（`--read-only`）、`/healthz` 健康检查、目录浏览范围收敛（`--fs-root`）
+- **热键**：`1/2/3` 切页，`s` 启动 / `r` 重启 / `t` 停止当前会话
 - **CLI 安装与版本管理**：检测 Claude Code / Codex 版本，查询 npm 最新版，安装最新版或固定版本，并调用 CLI 自更新
 - **保活看门狗**：勾选「保活」后，Agent 进程意外退出会自动重启（带快速失败熔断），界面显示重启次数 / 退出码
 - **内嵌 xterm.js 真终端**：完整渲染 Agent CLI 的交互式 TUI（边框 / 颜色 / 方向键 / 回车），可直接在网页里打字操作
@@ -19,7 +26,7 @@
 - **启动就绪检查**：每个连接显示缺少的 CLI、Base URL、模型或 API Key；Claude 官方登录不再被误报为缺少账号
 - 深色主题，简洁现代
 
-> 终端用 xterm.js（从 `cdn.jsdelivr.net` 加载）。离线环境会自动降级——供应商/账号管理照常可用，仅终端不可用。
+> 终端用 xterm.js（固定版本随包托管，**无需外网**，离线环境完整可用）。
 
 ## 先理解两个层次：Agent CLI 与 API 连接
 
@@ -42,7 +49,7 @@ Claude 官方、DeepSeek、Kimi、GLM、Qwen、OpenRouter 和 Anthropic 自定�
 
 ## 安装 & 启动
 
-已发布到 [PyPI](https://pypi.org/project/cc-switch-ui/)，安装后会得到一个 `cc-switch-ui` 命令。
+已发布到 [PyPI](https://pypi.org/project/cc-switch-ui/)，安装后得到两个命令：`cc-switch-ui`（Web 面板）和 `cc-switch`（命令行客户端）。
 
 ### 方式一：装成 CLI（推荐）
 
@@ -80,7 +87,33 @@ uv run cc-switch-ui --host 127.0.0.1 --port 8765
 
 启动后浏览器打开 **http://127.0.0.1:8765** 即可（`index.html` 由后端同源托管，无需单独打开文件，避免跨域问题）。
 
-> CLI 参数：`--host`（默认 `127.0.0.1`）、`--port`（默认 `8765`）、远程监听保护开关 `--allow-remote`，以及 CLI 安装/更新开关 `--allow-cli-management`。
+> CLI 参数：`--host`（默认 `127.0.0.1`）、`--port`（默认 `8765`）、远程监听保护开关 `--allow-remote`、CLI 安装/更新开关 `--allow-cli-management`、会话上限 `--max-sessions`（默认 8）、Bearer Token 鉴权 `--auth-token` / `--auth-token-file`、只读模式 `--read-only`、目录浏览根 `--fs-root`、独立配置目录 `--config-dir`。
+
+## 多会话与 cc-switch 命令行
+
+面板「运行」页左侧是**会话列表**：每个会话独立绑定供应商 / 账号 / 工作目录 / 会话模式，可同时运行多个（默认上限 8），终端、日志、状态互不串流。「+ 新会话」可手填参数，也可用**档案（profile）**——把「目录 + 连接 + 账号 + 模式」存成命名组合，建会话时一键物化。
+
+命令行客户端 `cc-switch` 与面板共用同一后端（默认 `http://127.0.0.1:8765`，`--url` 可改，`--token` 对应面板的 Bearer Token）：
+
+```bash
+cc-switch status --json              # 当前状态
+cc-switch use deepseek               # 切换当前供应商
+cc-switch sessions                   # 会话列表
+cc-switch session create 后端 --cwd ~/code/app --provider deepseek
+cc-switch session start <sid|档案名>  # 启动会话（档案名可代指）
+cc-switch account ls --provider deepseek
+cc-switch account add deepseek 公司key sk-...
+cc-switch export > backup.json       # 导出（默认脱敏，--include-keys 含原值）
+cc-switch import backup.json --replace
+```
+
+### 远程 / 多用户部署
+
+- 鉴权：`cc-switch-ui --auth-token <t>`（或 `--auth-token-file`）。设置后所有请求（含回环）都要带 `Authorization: Bearer <t>`；页面用 `http://host:port/?token=<t>` 打开即可（SSE 走 query token）。
+- 只读模式：`--read-only` 放行全部 GET 与终端操作（start/stop/restart/input/resize/keepalive），拒绝供应商 / 账号 / 配置 / CLI 变更——适合给「只看 + 操作终端」的同事开权限。
+- 审计：所有变更写入 `~/.cc-switch-ui/audit.jsonl`（JSON 行，10MB 自动轮转保留 3 份）。
+- 多用户隔离：`--config-dir /path`（或 `CC_CONFIG_DIR=/path ./run.sh start`）让每个用户独立的配置 / 回收站 / 日志 / 审计目录。
+- 健康检查：`GET /healthz` → `{"ok":true,"version":...,"agent_running":...,"session_count":...,"uptime":...}`。
 
 ## Claude Code / Codex 安装与版本管理
 
@@ -166,7 +199,7 @@ ssh -L 8765:127.0.0.1:8765 user@server
 
 ### 方式 A：源码目录中的 `run.sh` 守护脚本（无需 root、不依赖 systemd）
 
-用 `setsid` 脱离终端会话（SSH 断开也不死）+ 内部循环实现崩溃自动重启：
+有 `setsid` 时用它脱离终端会话，没有时（如 macOS）自动回退 `nohup` + 内层 `trap` 传导 TERM（SSH 断开也不死）+ 内部循环实现崩溃自动重启 + 日志 10MB 自动轮转（保留 3 份）：
 
 ```bash
 ./run.sh start      # 后台启动，脱离终端
@@ -181,6 +214,9 @@ CC_PORT=9000 CC_HOST=0.0.0.0 CC_ALLOW_REMOTE=1 ./run.sh start
 
 # 显式启用 CLI 安装/更新
 CC_ALLOW_CLI_MANAGEMENT=1 ./run.sh start
+
+# 独立配置目录（多用户隔离）
+CC_CONFIG_DIR=/tmp/other-user ./run.sh start
 ```
 
 开机自启（仍然无需 root，用 crontab）：

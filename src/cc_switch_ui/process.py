@@ -15,6 +15,7 @@ import subprocess
 import termios
 import threading
 import time
+import uuid
 
 
 class AgentProcess:
@@ -43,6 +44,10 @@ class AgentProcess:
         self._last_launch_signature = None
         self._launch_signature = None
         self.launch_snapshot = None
+        self._rebuild_launch = None  # 看门狗重建钩子：返回 (launch, fingerprint)，或不可用时返回 None
+        self.log_path = None         # 最近一次 pty 输出日志路径（停止后仍展示）
+        self.last_output_at = None   # 最近一次收到输出时间，用于「等输入」检测
+        self._rss_cache = None       # (时间戳, rss_kb) 缓存，5 秒内复用
 
     # ---- 状态 ----
     def is_running(self):
@@ -50,7 +55,7 @@ class AgentProcess:
 
     def status(self):
         running = self.is_running()
-        return {
+        status = {
             "running": running,
             "pid": self.proc.pid if running else None,
             "started_at": self.started_at,
@@ -62,7 +67,37 @@ class AgentProcess:
             "restart_count": self.restart_count,
             "last_exit_code": self.last_exit_code,
             "launch": dict(self.launch_snapshot) if running and self.launch_snapshot else None,
+            "log_path": self.log_path,
         }
+        if running:
+            base = self.last_output_at or self.started_at
+            if base:
+                status["idle_seconds"] = int(time.time() - base)
+            status["rss_kb"] = self._rss_kb()
+        return status
+
+    def _rss_kb(self):
+        """当前子进程 RSS（KB）：Linux 读 /proc，macOS 用 ps；5 秒缓存，取不到为 None。"""
+        now = time.time()
+        cached = self._rss_cache
+        if cached and now - cached[0] < 5:
+            return cached[1]
+        value = None
+        pid = self.proc.pid
+        try:
+            with open(f"/proc/{pid}/statm", encoding="ascii") as f:
+                value = int(f.read().split()[1]) * 4
+        except (OSError, ValueError, IndexError):
+            try:
+                out = subprocess.run(
+                    ["ps", "-o", "rss=", "-p", str(pid)],
+                    capture_output=True, timeout=2,
+                )
+                value = int(out.stdout.decode().strip())
+            except (OSError, ValueError, subprocess.SubprocessError):
+                value = None
+        self._rss_cache = (now, value)
+        return value
 
     # ---- 订阅/广播 ----
     def subscribe(self):
@@ -92,11 +127,19 @@ class AgentProcess:
                 self.subscribers.discard(q)
 
     # ---- 读取线程 ----
-    def _reader(self, fd, proc):
+    def _reader(self, fd, proc, log_path=None, log_cap=50 * 1024 * 1024):
         # 增量解码：UTF-8 多字节字符（TUI 框线 ─│└、中文、emoji）可能被 4096
         # 字节的读取边界切断，逐块独立 decode 会把切断处变成乱码。增量解码器
         # 会把读到一半的尾字节留到下一块拼回来。
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        # pty 输出落盘：解码前写原始字节，累计达 log_cap 后停止写入（句柄保留）
+        log_file = None
+        log_bytes = 0
+        if log_path:
+            try:
+                log_file = open(log_path, "wb")
+            except OSError:
+                log_file = None
         while True:
             try:
                 r, _, _ = select.select([fd], [], [], 0.5)
@@ -104,6 +147,19 @@ class AgentProcess:
                     data = os.read(fd, 4096)
                     if not data:
                         break
+                    if log_file is not None and log_bytes < log_cap:
+                        try:
+                            chunk = data[: log_cap - log_bytes]
+                            log_file.write(chunk)
+                            log_file.flush()
+                            log_bytes += len(chunk)
+                        except OSError:
+                            try:
+                                log_file.close()
+                            except OSError:
+                                pass
+                            log_file = None
+                    self.last_output_at = time.time()
                     text = decoder.decode(data)
                     if text:
                         self._broadcast(text)
@@ -116,6 +172,11 @@ class AgentProcess:
             os.close(fd)
         except OSError:
             pass
+        if log_file is not None:
+            try:
+                log_file.close()
+            except OSError:
+                pass
         try:
             exit_code = proc.wait(timeout=0.2)
         except subprocess.TimeoutExpired:
@@ -131,13 +192,18 @@ class AgentProcess:
             self._on_exit(proc)
 
     # ---- 看门狗：意外退出后自动重启 ----
+    def set_rebuild_launch(self, fn):
+        """设置看门狗重建钩子：fn() 返回 (launch, fingerprint)，当前选择不可用时返回 None。"""
+        with self.lifecycle_lock:
+            self._rebuild_launch = fn
+
     def _on_exit(self, proc):
         with self.lifecycle_lock:
             if proc is not self.proc or self._stopping or not self.keepalive:
                 return
-        ran = time.time() - (self.started_at or time.time())
-        # 熔断：进程启动后 <5 秒就挂，多半是 key/网络问题，连续 5 次则停手
-        self._fast_fail = self._fast_fail + 1 if ran < 5 else 0
+            ran = time.time() - (self.started_at or time.time())
+            # 熔断：进程启动后 <5 秒就挂，多半是 key/网络问题，连续 5 次则停手
+            self._fast_fail = self._fast_fail + 1 if ran < 5 else 0
         if self._fast_fail >= 5:
             self.keepalive = False
             self._broadcast(
@@ -151,6 +217,39 @@ class AgentProcess:
         if self._stopping or not self.keepalive:
             return
         last = self.last_launch or {}
+        rebuild = self._rebuild_launch
+        if rebuild is not None:
+            rebuilt = rebuild()
+            if rebuilt is None:
+                self.keepalive = False
+                self._broadcast(
+                    "\n[看门狗] 当前选择不可用，已停止自动重启。"
+                    "请检查配置后手动启动。\n"
+                )
+                return
+            launch, fingerprint = rebuilt
+            cwd = last.get("cwd")
+            self.start(
+                launch.get("env") or {}, launch.get("label") or "?",
+                rows=last.get("rows", 24), cols=last.get("cols", 80),
+                cwd=cwd,
+                command=launch.get("command"),
+                clear_env=launch.get("clear_env"),
+                client=launch.get("client") or "claude",
+                launch_snapshot={
+                    "provider_id": launch.get("provider_id"),
+                    "provider_label": launch.get("provider_label", launch.get("label", "?")),
+                    "client": launch.get("client", "claude"),
+                    "base_url": launch.get("base_url", ""),
+                    "model": launch.get("model", ""),
+                    "account_id": launch.get("account_id"),
+                    "account_name": launch.get("account_name", ""),
+                    "session_mode": launch.get("session_mode", "new"),
+                    "cwd": cwd or os.getcwd(),
+                },
+                launch_signature=fingerprint,
+            )
+            return
         self.start(
             self._last_env or {}, self._last_label or "?",
             rows=last.get("rows", 24), cols=last.get("cols", 80),
@@ -176,7 +275,7 @@ class AgentProcess:
     def start(
         self, env_extra, provider_label, args=None, rows=24, cols=80, cwd=None,
         command=None, clear_env=None, client="claude", launch_snapshot=None,
-        launch_signature=None,
+        launch_signature=None, log_path=None, log_cap: int = 50 * 1024 * 1024,
     ):
         with self.lifecycle_lock:
             if self.is_running():
@@ -221,6 +320,8 @@ class AgentProcess:
             self.master_fd = master
             self.set_winsize(rows, cols)  # 按前端终端尺寸初始化，避免 TUI 错位
             self.started_at = time.time()
+            self.last_output_at = time.time()
+            self.log_path = str(log_path) if log_path is not None else self.log_path
             self.provider_label = provider_label
             self.client = client
             self._last_env = dict(env_extra)
@@ -240,7 +341,7 @@ class AgentProcess:
             self._broadcast(f"[启动 {client} · 供应商: {provider_label}]\n")
 
         self.reader_thread = threading.Thread(
-            target=self._reader, args=(master, proc), daemon=True
+            target=self._reader, args=(master, proc, log_path, int(log_cap)), daemon=True
         )
         self.reader_thread.start()
         return True, "已启动"
@@ -273,9 +374,68 @@ class AgentProcess:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         except (ProcessLookupError, OSError):
             pass
-        # master_fd is owned by the reader thread. Keeping it open until that
-        # thread exits prevents its descriptor number being reused by a new PTY.
+        # 实例级引用在此清理；OS 级 master fd 仍由 reader 线程持有，
+        # 线程退出时才真正关闭，新 PTY 不会复用该描述符。
+        # proc 保留死引用，供 last_exit_code / is_current 判断；_stopping 不重置。
+        with self.lifecycle_lock:
+            self.master_fd = None
+            self.launch_snapshot = None
         return True, "已停止"
+
+    def reset_fast_fail(self):
+        """重置连续快速失败计数（用户手动重新启动时调用）。"""
+        with self.lifecycle_lock:
+            self._fast_fail = 0
+
+
+
+class SessionRegistry:
+    """管理多个并行 Agent 会话（各自独立的 AgentProcess 实例）。"""
+
+    DEFAULT_ID = "default"
+
+    def __init__(self, max_sessions: int = 8):
+        self._sessions = {}
+        self._max_sessions = max_sessions
+        self._lock = threading.Lock()
+
+    def get(self, sid: str) -> AgentProcess | None:
+        with self._lock:
+            return self._sessions.get(sid)
+
+    def get_or_create_default(self) -> AgentProcess:
+        with self._lock:
+            proc = self._sessions.get(self.DEFAULT_ID)
+            if proc is None:
+                proc = AgentProcess()
+                self._sessions[self.DEFAULT_ID] = proc
+            return proc
+
+    def create(self, sid: str | None = None) -> AgentProcess:
+        """新建会话；sid 缺省时生成 uuid4().hex[:8]，达上限抛 ValueError。"""
+        with self._lock:
+            if len(self._sessions) >= self._max_sessions:
+                raise ValueError("会话数已达上限")
+            sid = sid if sid is not None else uuid.uuid4().hex[:8]
+            proc = AgentProcess()
+            self._sessions[sid] = proc
+            return proc
+
+    def remove(self, sid: str) -> AgentProcess | None:
+        """移除会话：先 stop() 子进程，再从注册表丢弃。"""
+        with self._lock:
+            proc = self._sessions.pop(sid, None)
+        if proc is not None:
+            proc.stop()
+        return proc
+
+    def list(self) -> list[AgentProcess]:
+        with self._lock:
+            return list(self._sessions.values())
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._sessions)
 
 
 # Backward-compatible import for existing integrations.

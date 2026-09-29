@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+from .config import mask_url_credentials
 
 
 CLI_SPECS = {
@@ -39,7 +40,6 @@ _VERSION_RE = re.compile(r"^(?:v)?[0-9]+(?:\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?
 _VERSION_IN_OUTPUT_RE = re.compile(
     r"(?<![0-9])([0-9]+(?:\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
 )
-_URL_CREDENTIALS_RE = re.compile(r"(https?://)[^\s/@:]+:[^\s/@]+@", re.IGNORECASE)
 
 
 class CliManagerError(RuntimeError):
@@ -47,7 +47,7 @@ class CliManagerError(RuntimeError):
 
 
 def _trim_output(text: str, limit: int = 8000) -> str:
-    text = _URL_CREDENTIALS_RE.sub(r"\1***:***@", text or "").strip()
+    text = mask_url_credentials(text or "").strip()
     if len(text) <= limit:
         return text
     return text[-limit:]
