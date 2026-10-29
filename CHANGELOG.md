@@ -23,9 +23,9 @@
 
 ### 工程
 
-- 新增 GitHub Actions CI：ruff + unittest（3.12/3.13）+ 构建产物 + tag 触发 PyPI
-  Trusted Publisher 发布。
-- 新增 `CHANGELOG.md`。
+- 新增 GitHub Actions CI：错误级 ruff 门禁 + unittest（3.12/3.13）+ 构建；tag 推送时自动把
+  dist 产物挂到 GitHub Release（PyPI 发布见 README「发布」一节）。
+- 新增 `tests/test_guard.py`(守卫/脱敏/版本同步回归测试)与 `CHANGELOG.md`。
 
 ## 0.6.0
 

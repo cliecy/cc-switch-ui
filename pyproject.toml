@@ -64,3 +64,18 @@ include = [
     "run.sh",
     "LICENSE",
 ]
+
+[tool.ruff]
+# 最小门禁：只拦「会真出事」的错误级问题（语法错误 / 未定义名）。
+# 存量风格问题不在此治理，避免一次性大改；后续可渐进收紧。
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+  "E9",   # 语法级错误
+  "F63",  # 无效比较
+  "F7",   # 语法级 assert 位置错误
+  "F82",  # 未定义名
+  "F821", # 未知名称引用
+]

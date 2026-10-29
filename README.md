@@ -318,3 +318,11 @@ Codex 自定义供应商使用临时的 `CC_SWITCH_CODEX_API_KEY`，并通过 CL
 - 配置文件权限已设为 `0600`，采用临时文件 + 原子 rename 写入；损坏时会先备份为 `.ccm_config.corrupt-*` 再重建，API Key 不会静默丢失。
 - 密钥在 API 与前端均脱敏展示（保留首尾数位），且渲染前经服务端字符过滤 + 前端 HTML 转义双重处理。
 - 旧 `/api/claude/*` 路径继续保留为兼容别名。
+
+## CI 与发布
+
+- CI（GitHub Actions，`.github/workflows/ci.yml`）：错误级 ruff 门禁（见 `pyproject.toml` 的 `[tool.ruff]`）+ Python 3.12 / 3.13 全量 unittest + 构建产物。
+- **发版流程**：更新 `pyproject.toml` 版本 → 打 tag（`git tag -a vX.Y.Z && git push origin vX.Y.Z`）→ CI 自动构建并把 wheel/sdist 挂到对应的 GitHub Release。
+- **发布到 PyPI**（二选一）：
+  1. 手动：`uv build && uvx twine upload dist/*`
+  2. 自动：在 pypi.org 把项目登记为 Trusted Publisher（owner=cliecy，repo=cc-switch-ui，workflow=ci.yml，environment=pypi），然后在 CI 中恢复 `pypa/gh-action-pypi-publish@release/v1` 步骤（tag 触发）。

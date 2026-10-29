@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
     runs-on: ubuntu-latest
@@ -17,8 +18,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Ruff lint
-        run: uvx ruff check src tests
+      - name: Ruff lint（错误级门禁，见 pyproject [tool.ruff]）
+        run: uvx ruff check .
       - name: Run tests
         run: uv run python -m unittest discover -s tests -v
 
@@ -34,18 +35,19 @@ jobs:
           name: dist
           path: dist/
 
-  pypi-publish:
-    # 需先在 PyPI 把本项目登记为 Trusted Publisher：
-    #   owner=cliecy repo=cc-switch-ui workflow=ci.yml environment=pypi
+  release:
+    # tag 推送时：构建 wheel/sdist 并自动挂到对应 GitHub Release，
+    # PyPI 发布见 README「发布」一节（Trusted Publisher 或手动 twine）。
     needs: [test, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
-      id-token: write   # PyPI Trusted Publishing（OIDC，无需 token）
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv build
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Attach dists to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
