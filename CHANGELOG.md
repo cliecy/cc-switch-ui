@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.0 —— 2025-10-29
+
+### 新增
+
+- **TUI 终端模式**：`cc-switch-ui tui` 在终端里直接查看 / 切换供应商与账号、启停默认
+  Agent（s/x），支持 `--read-only` 只读查看。零第三方依赖（仅标准库 curses），与 Web UI
+  共享同一套切换语义、密钥脱敏与审计日志（`tui_switch`）。键位：`↑/↓ j/k` 移动、
+  `Enter` 切换、`g/G/Home/End` 跳转、`r` 刷新、`q` 退出。
+- 切换核心下沉为 `config.switch_current()`（Web 与 TUI 共用，先校验后写盘）；审计日志
+  核心下沉为 `config.append_audit()`（Web 补充请求源字段，TUI 无网络字段）。
+- 新增 `tests/test_tui.py`（行渲染 / 导航 / 切换持久化 / 审计回归）。
+
+### 测试修复
+
+- pty 假 Agent 的 shim 统一改为 `exec cat`：dash 不做尾部 exec 优化，SIGKILL 掉 sh 后
+  孤儿 cat 仍占住 pty，Linux runner 上看门狗测试永远超时（macOS bash 隐式 exec 掩盖了
+  该问题）；
+- log-cap 测试改为轮询等待落盘后断言，消除 drain 竞争（`0 != 64` 的偶发失败）。
+
 ## 0.6.1 — 2025-10-29（安全加固版）
 
 针对全量代码安全审计结论的集中修复。

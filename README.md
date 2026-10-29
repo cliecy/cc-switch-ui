@@ -64,7 +64,16 @@ cc-switch-ui
 
 # 指定地址端口
 cc-switch-ui --host 127.0.0.1 --port 8765
+
+# 终端 TUI 模式（无需浏览器）：查看 / 切换供应商与账号、启停 Agent
+cc-switch-ui tui
+cc-switch-ui tui --read-only   # 只读查看
 ```
+
+TUI 键位：`↑/↓`（或 `j/k`）移动，`Enter` 切换（账号行会同时激活该账号），
+`g/G` 跳到顶部 / 底部，`s` 启动 Agent、`x` 停止，`r` 刷新，`q` 退出。
+无需任何第三方依赖，SSH 终端里也能用。
+
 
 免安装、一次性试跑：
 

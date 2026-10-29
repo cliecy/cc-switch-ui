@@ -62,7 +62,7 @@ except importlib.metadata.PackageNotFoundError:
 _STARTED_AT = time.time()
 
 # 审计日志：超过 10MB 轮转 .1→.2→.3，最多保留 3 份
-_AUDIT_FILE = "audit.jsonl"
+_AUDIT_FILE = config.AUDIT_FILE  # 兼容旧引用
 _AUDIT_MAX_BYTES = 10 * 1024 * 1024
 
 # 只读模式白名单：团队查看者可以操作终端，但改不了供应商/账号/CLI/配置
@@ -76,31 +76,13 @@ def _err(code, message, status):
 
 def _audit(action, target="", result="ok"):
     """追加一行结构化审计记录（仅在请求上下文中调用，失败不影响主流程）。"""
-    try:
-        state_dir = config.STATE_DIR
-        state_dir.mkdir(parents=True, exist_ok=True)
-        path = state_dir / _AUDIT_FILE
-        if path.exists() and path.stat().st_size > _AUDIT_MAX_BYTES:
-            for i in (2, 1):
-                older = path.with_name(f"{_AUDIT_FILE}.{i}")
-                if older.exists():
-                    os.replace(older, path.with_name(f"{_AUDIT_FILE}.{i + 1}"))
-            os.replace(path, path.with_name(f"{_AUDIT_FILE}.1"))
-        line = json.dumps(
-            {
-                "ts": datetime.now(timezone.utc).isoformat(),
-                "remote_addr": request.remote_addr,
-                "origin": request.headers.get("Origin", ""),
-                "action": action,
-                "target": target,
-                "result": result,
-            },
-            ensure_ascii=False,
-        )
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception:  # noqa: BLE001 —— 审计失败不能破坏主流程
-        pass
+    config.append_audit(
+        action,
+        target=target,
+        result=result,
+        remote_addr=request.remote_addr,
+        origin=request.headers.get("Origin", ""),
+    )
 
 
 def _terminal_path_allowed(path):
@@ -610,15 +592,12 @@ def create_app(
         agent_proc = registry.get_or_create_default()
         data = _json_body()
         pid = data.get("provider")
-        with get_lock():
-            cfg = load_config()
-            if pid not in cfg["providers"]:
-                return _err("unknown_provider", "未知供应商", 400)
-            cfg["current_provider"] = pid
-            client = cfg["providers"][pid].get("client", "claude")
-            save_config(cfg)
+        ok, err = config.switch_current(pid)
+        if not ok:
+            return _err(err, "未知供应商", 400)
         _audit("provider_switch", target=pid)
 
+        client = config.load_config()["providers"][pid].get("client", "claude")
         # 若系统存在 ccm，则调用其切换命令（不强制依赖）
         ccm_output = None
         if client == "claude" and shutil.which("ccm"):

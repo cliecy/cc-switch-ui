@@ -38,6 +38,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="CC Switch Web UI —— Claude Code / Codex 多供应商管理面板",
     )
+    parser.add_argument(
+        "command", nargs="?", default=None, choices=["tui"],
+        help="启动模式：省略 = Web UI；tui = 终端交互界面（curses）",
+    )
     parser.add_argument("--host", default="127.0.0.1", help="监听地址 (默认 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8765, help="监听端口 (默认 8765)")
     parser.add_argument(
@@ -89,6 +93,11 @@ def main():
         )
     if args.allow_cli_management and not _is_loopback_host(args.host):
         parser.error("CLI 安装/更新只能在回环地址启用；请通过 SSH 端口转发访问")
+
+    if args.command == "tui":
+        from .tui import run_tui
+        run_tui(read_only=args.read_only)
+        return
 
     setup_logging()
 

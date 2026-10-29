@@ -450,6 +450,60 @@ def active_account_of(provider: dict):
     return None
 
 
+# ------ 审计日志（Web 与 TUI 共用；网络字段由调用方选择性补充） ------ #
+
+AUDIT_FILE = "audit.jsonl"
+_AUDIT_MAX_BYTES = 5 * 1024 * 1024  # 5MB 轮转
+
+
+def append_audit(action, target=None, result="ok", **fields):
+    """追加一行审计日志（STATE_DIR/audit.jsonl）；审计失败不能破坏主流程。"""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        path = STATE_DIR / AUDIT_FILE
+        if path.exists() and path.stat().st_size > _AUDIT_MAX_BYTES:
+            for i in (2, 1):
+                older = path.with_name(f"{AUDIT_FILE}.{i}")
+                if older.exists():
+                    os.replace(older, path.with_name(f"{AUDIT_FILE}.{i + 1}"))
+            os.replace(path, path.with_name(f"{AUDIT_FILE}.1"))
+        line = json.dumps(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "action": action,
+                "target": target,
+                "result": result,
+                **fields,
+            },
+            ensure_ascii=False,
+        )
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def switch_current(provider_id, account_id=None) -> tuple[bool, str | None]:
+    """切换当前供应商 / 激活账号 —— Web 与 TUI 共享的切换核心语义。
+
+    返回 (ok, error_code)：error_code 为 None 表示成功；
+    失败时配置保持原样（先校验、后写盘）。
+    """
+    with get_lock():
+        cfg = load_config()
+        provider = cfg["providers"].get(provider_id)
+        if not provider:
+            return False, "unknown_provider"
+        if account_id is not None:
+            if account_id not in [a["id"] for a in provider.get("accounts", [])]:
+                return False, "unknown_account"
+            provider["active_account"] = account_id
+        cfg["current_provider"] = provider_id
+        save_config(cfg)
+        return True, None
+
+
+
 def _account_for_launch(provider: dict, account_id=None):
     """指定 account_id 且存在时用该账号，否则回落到激活账号。"""
     if account_id is not None:
