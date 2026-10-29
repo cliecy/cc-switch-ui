@@ -114,6 +114,52 @@ def _terminal_path_allowed(path):
     return False
 
 
+# --------------------------------------------------------------------------- #
+# Host 白名单（防 DNS rebinding）与 JSON body 工具
+# --------------------------------------------------------------------------- #
+
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1", "[127.0.0.1]"}
+
+
+def _is_literal_ip(hostname: str) -> bool:
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        return False
+
+
+def _allowed_host(host_header: str) -> bool:
+    """拒绝非回环/非字面 IP 的域名 Host。
+
+    DNS rebinding 攻击中，恶意域什解析到 127.0.0.1，此时 Origin 与 Host 同为
+    该域什，Origin 校验形同虚设 —— 必须直接拦 Host。字面 IP（含局域网 IP）
+    与 *.local 不经过 DNS rebinding，放行；其余域名可用环境变量
+    CC_ALLOWED_HOSTS 显式放行（如自建主机名）。
+    """
+    hostname = (host_header or "").rsplit(":", 1)[0].strip("[]").lower()
+    if not hostname:
+        return True  # 无 Host 的非浏览器客户端，交给 token/Origin 校验
+    if hostname in _LOOPBACK_HOSTS:
+        return True
+    if hostname.endswith(".local"):
+        return True
+    if _is_literal_ip(hostname):
+        return True
+    allowed = os.environ.get("CC_ALLOWED_HOSTS", "")
+    if allowed:
+        extras = {h.strip().lower() for h in allowed.split(",") if h.strip()}
+        if hostname in extras:
+            return True
+    return False
+
+
+def _json_body():
+    """宽容解析请求 JSON 并保证 dict 类型（不依赖客户端 Content-Type 声明）。"""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
 def _session_log_path(sid):
     """会话 pty 输出日志路径（按启动时刻命名）。"""
     logs_dir = config.STATE_DIR / "logs"
@@ -152,12 +198,19 @@ def create_app(
     )
 
     # ------------------------------------------------------------------- #
-    # 请求前置检查：时间戳 → token 鉴权 → Origin 校验 → 只读模式
+    # 请求前置检查：时间戳 → Host 白名单 → token 鉴权 → Origin 校验 → 只读模式
     # ------------------------------------------------------------------- #
 
     @app.before_request
     def _stamp_request():
         request._ccm_t0 = time.monotonic()
+
+    @app.before_request
+    def _check_host():
+        if request.path.startswith("/api/") and not _allowed_host(request.host):
+            _audit("unauthorized", result="host_mismatch")
+            return _err("host_mismatch", "拒绝的 Host（疑似 DNS rebinding）", 403)
+        return None
 
     @app.before_request
     def _check_auth():
@@ -555,7 +608,7 @@ def create_app(
     @app.post("/api/provider/switch")
     def api_switch_provider():
         agent_proc = registry.get_or_create_default()
-        data = request.get_json(force=True)
+        data = _json_body()
         pid = data.get("provider")
         with get_lock():
             cfg = load_config()
@@ -596,7 +649,7 @@ def create_app(
     @app.put("/api/provider/<pid>")
     def api_edit_provider(pid):
         """编辑供应商端点：base_url / model / 鉴权变量 / 显示名。"""
-        data = request.get_json(force=True)
+        data = _json_body()
         with get_lock():
             cfg = load_config()
             p = cfg["providers"].get(pid)
@@ -683,7 +736,7 @@ def create_app(
 
     @app.post("/api/account")
     def api_add_account():
-        data = request.get_json(force=True)
+        data = _json_body()
         pid = data.get("provider")
         name = (data.get("name") or "").strip() or "未命名账号"
         api_key = (data.get("api_key") or "").strip()
@@ -701,7 +754,7 @@ def create_app(
 
     @app.put("/api/account/<aid>")
     def api_edit_account(aid):
-        data = request.get_json(force=True)
+        data = _json_body()
         pid = data.get("provider")
         with get_lock():
             cfg = load_config()
@@ -786,7 +839,7 @@ def create_app(
 
     @app.post("/api/account/activate")
     def api_activate_account():
-        data = request.get_json(force=True)
+        data = _json_body()
         pid = data.get("provider")
         aid = data.get("account_id")
         with get_lock():
@@ -1152,7 +1205,7 @@ def create_app(
         proc, error = _session_proc(sid)
         if error is not None:
             return error
-        data = request.get_json(force=True)
+        data = _json_body()
         if not isinstance(data, dict):
             return _err("validation", "请求体必须是 JSON 对象", 400)
         if "raw" in data:
@@ -1177,7 +1230,7 @@ def create_app(
         proc, error = _session_proc(sid)
         if error is not None:
             return error
-        data = request.get_json(force=True)
+        data = _json_body()
         if not isinstance(data, dict):
             return _err("validation", "请求体必须是 JSON 对象", 400)
         rows, cols, size_error = terminal_size(data)
@@ -1191,7 +1244,7 @@ def create_app(
         proc, error = _session_proc(sid)
         if error is not None:
             return error
-        data = request.get_json(force=True)
+        data = _json_body()
         if not isinstance(data, dict):
             return _err("validation", "请求体必须是 JSON 对象", 400)
         enabled = bool(data.get("enabled"))
@@ -1493,7 +1546,7 @@ def create_app(
     @app.post("/api/claude/resize")
     def api_agent_resize():
         agent_proc = registry.get_or_create_default()
-        data = request.get_json(force=True)
+        data = _json_body()
         if not isinstance(data, dict):
             return _err("validation", "请求体必须是 JSON 对象", 400)
         rows, cols, error = terminal_size(data)
@@ -1506,7 +1559,7 @@ def create_app(
     @app.post("/api/claude/keepalive")
     def api_agent_keepalive():
         agent_proc = registry.get_or_create_default()
-        data = request.get_json(force=True)
+        data = _json_body()
         if not isinstance(data, dict):
             return _err("validation", "请求体必须是 JSON 对象", 400)
         enabled = bool(data.get("enabled"))
@@ -1531,7 +1584,7 @@ def create_app(
     @app.post("/api/claude/input")
     def api_agent_input():
         agent_proc = registry.get_or_create_default()
-        data = request.get_json(force=True)
+        data = _json_body()
         if not isinstance(data, dict):
             return _err("validation", "请求体必须是 JSON 对象", 400)
         if "raw" in data:
@@ -1601,7 +1654,7 @@ def create_app(
     @app.post("/api/config/import")
     def api_config_import():
         """导入配置：merge（账号按 id 并集）或 replace（先备份当前配置）。"""
-        data = request.get_json(force=True)
+        data = _json_body()
         if not isinstance(data, dict) or not isinstance(data.get("config"), dict):
             return _err("validation", "导入内容必须是 {config: {...}} 对象", 400)
         mode = data.get("mode", "merge")

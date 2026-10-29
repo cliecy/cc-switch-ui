@@ -953,7 +953,7 @@ function buildProviderCard(provider, currentProviderId) {
       <div class="account ${isSelected ? "active" : ""}">
         <span class="dot"></span>
         <span>${escapeHtml(account.name)}${account.shared ? " 🤝" : ""}</span>
-        <span class="key">${account.has_key ? account.key_masked : "（无 Key）"}</span>
+        <span class="key">${account.has_key ? escapeHtml(account.key_masked) : "（无 Key）"}</span>
         <span class="acts">
           ${isSelected ? '<span class="badge on">已选</span>'
                        : `<button class="sm ghost" onclick="activate('${p.id}','${account.id}',this)">下次使用</button>`}

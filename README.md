@@ -311,6 +311,10 @@ Codex 自定义供应商使用临时的 `CC_SWITCH_CODEX_API_KEY`，并通过 CL
 ## 安全提示
 
 - 默认仅允许监听回环地址。建议服务器通过 SSH 隧道访问；不要把无鉴权面板直接暴露到公网。
+- 需要远程使用时，启动加 `--auth-token`（或 `--auth-token-file`）并配合 `--allow-remote`；SSH 隧道场景不加 token 也可，但会失去一层保护。
+- **DNS rebinding 防护**：所有 `/api/*` 请求会校验 Host —— 仅放行回环主机名、字面 IP（含局域网 IP）与 `*.local`；其余域名一律 403。若需要用自建域名访问，设置环境变量 `CC_ALLOWED_HOSTS=myhost.example.com,other.example.org`。
+- **同源校验**：浏览器跨站的 POST/PUT/DELETE（`Origin` 与 `Host` 不匹配）直接 403，防恶意网页 CSRF；curl / 脚本等非浏览器客户端不受影响。
 - CLI 安装/更新默认关闭；启用后接口能修改当前用户的全局 CLI 安装，因此更不能暴露到不可信网络。
-- 配置文件权限已设为 `0600`。
+- 配置文件权限已设为 `0600`，采用临时文件 + 原子 rename 写入；损坏时会先备份为 `.ccm_config.corrupt-*` 再重建，API Key 不会静默丢失。
+- 密钥在 API 与前端均脱敏展示（保留首尾数位），且渲染前经服务端字符过滤 + 前端 HTML 转义双重处理。
 - 旧 `/api/claude/*` 路径继续保留为兼容别名。

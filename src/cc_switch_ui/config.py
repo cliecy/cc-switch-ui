@@ -426,11 +426,15 @@ def restore_account(provider_id, account_id) -> tuple[dict | None, str | None]:
 def mask_key(key: str) -> str:
     if not key:
         return ""
-    if len(key) <= 8:
-        return "•" * len(key)
-    if len(key) <= 16:
-        return f"{key[:2]}{'•' * 6}{key[-2:]}"
-    return f"{key[:4]}{'•' * 6}{key[-4:]}"
+    # 只保留密钥常见安全字符：防异常内容（如 HTML/JS 载荷）透传到前端渲染层
+    safe = "".join(c for c in key if c.isalnum() or c in "._-")
+    if not safe:
+        return "•" * 8
+    if len(safe) <= 8:
+        return "•" * len(safe)
+    if len(safe) <= 16:
+        return f"{safe[:2]}{'•' * 6}{safe[-2:]}"
+    return f"{safe[:4]}{'•' * 6}{safe[-4:]}"
 
 
 def mask_url_credentials(url: str) -> str:
