@@ -127,7 +127,8 @@ class AgentProcessTests(unittest.TestCase):
             env_dump = temp_dir / "env.dump"
             agent = bin_dir / "claude"
             agent.write_text(
-                "#!/bin/sh\necho \"$ANTHROPIC_AUTH_TOKEN\" > \"$ENV_DUMP\"\ncat\n",
+                "#!/bin/sh\necho \"$ANTHROPIC_AUTH_TOKEN\" > \"$ENV_DUMP\"\nexec cat\n",
+                # exec：被杀时直接退出，不残留占用 pty 的孤儿 cat（dash 无尾部 exec 优化）
                 encoding="utf-8",
             )
             agent.chmod(0o700)
@@ -363,6 +364,13 @@ class AgentProcessTests(unittest.TestCase):
             self.assertTrue(ok)
 
             self.assertTrue(process.send_input("x" * 200 + "\n")[0])
+            # 等待 reader 将输入落盘到 64B 上限，避免慢 runner 上与 drain 竞争
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                if log_file.exists() and log_file.stat().st_size >= 64:
+                    break
+                time.sleep(0.05)
+
             process.stop()
             process.reader_thread.join(timeout=3)
 

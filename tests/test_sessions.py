@@ -14,7 +14,8 @@ def _write_shim(bin_dir, name, marker):
     """fake CLI：启动时回显唯一 marker，然后 cat 保持存活并回显输入。"""
     script = bin_dir / name
     script.write_text(
-        f"#!/bin/sh\necho {marker}\ncat\n", encoding="utf-8"
+        f"#!/bin/sh\necho {marker}\nexec cat\n",  # exec：被杀时直接退出，不留占用 pty 的孤儿（dash 无尾部 exec 优化）
+        encoding="utf-8",
     )
     script.chmod(0o755)
 
